@@ -5,6 +5,7 @@ import tempfile
 
 from dagster_pipes import (
     PipesDefaultLogWriter,
+    PipesDefaultMessageWriter,
     PipesFileMessageWriterChannel,
     PipesStdioFileLogWriter,
 )
@@ -39,7 +40,9 @@ def test_pipes_default_log_writer(capsys):
             PipesDefaultLogWriter()
         )  # large interval will cause all lines to appear in a single message
         log_writer.message_channel = message_channel
-        with capsys.disabled(), log_writer.open({}):
+        with capsys.disabled(), log_writer.open(
+            {PipesDefaultMessageWriter.INCLUDE_STDIO_IN_MESSAGES_KEY: True}
+        ):
             print("Writing this to stdout")  # noqa
             print("And this to stderr", file=sys.stderr)  # noqa
         with open(file.name, "r") as log_file:

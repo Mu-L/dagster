@@ -13,7 +13,7 @@ import traceback
 import warnings
 import zlib
 from abc import ABC, abstractmethod
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from io import StringIO
 from queue import Queue
 from threading import Event, Thread
@@ -932,12 +932,25 @@ class PipesDefaultMessageWriter(PipesMessageWriter):
     BUFFERED_STDIO_KEY = "buffered_stdio"
     STDERR = "stderr"
     STDOUT = "stdout"
+    INCLUDE_STDIO_IN_MESSAGES_KEY: str = "include_stdio_in_messages"
 
     @contextmanager
     def open(self, params: PipesParams) -> Iterator[PipesMessageWriterChannel]:
         if self.FILE_PATH_KEY in params:
             path = _assert_env_param_type(params, self.FILE_PATH_KEY, str, self.__class__)
-            yield PipesFileMessageWriterChannel(path)
+            channel = PipesFileMessageWriterChannel(path)
+
+            if params.get(self.INCLUDE_STDIO_IN_MESSAGES_KEY):
+                log_writer = PipesDefaultLogWriter()
+                log_writer.message_channel = channel
+                maybe_open_log_writer = log_writer.open(
+                    params.get(PipesLogWriter.LOG_WRITER_KEY, {})
+                )
+            else:
+                maybe_open_log_writer = nullcontext()
+
+            with maybe_open_log_writer:
+                yield channel
 
         elif self.STDIO_KEY in params:
             stream = _assert_env_param_type(params, self.STDIO_KEY, str, self.__class__)
