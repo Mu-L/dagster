@@ -52,6 +52,7 @@ from dagster._core.execution.asset_backfill import (
     AssetBackfillData,
     AssetBackfillIterationResult,
     AssetBackfillStatus,
+    backfill_is_complete,
     execute_asset_backfill_iteration_inner,
     get_canceling_asset_backfill_iteration_data,
 )
@@ -615,7 +616,9 @@ def run_backfill_to_completion(
         evaluation_time=backfill_data.backfill_start_datetime,
     )
 
-    while not backfill_data.is_complete():
+    while not backfill_is_complete(
+        backfill_id=backfill_id, backfill_data=backfill_data, instance=instance
+    ):
         iteration_count += 1
 
         result1 = execute_asset_backfill_iteration_consume_generator(
@@ -625,7 +628,6 @@ def run_backfill_to_completion(
             instance=instance,
         )
 
-        # iteration_count += 1
         assert result1.backfill_data != backfill_data
 
         instance_queryer = _get_instance_queryer(
