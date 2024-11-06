@@ -13,7 +13,7 @@ import traceback
 import warnings
 import zlib
 from abc import ABC, abstractmethod
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from io import StringIO
 from queue import Queue
 from threading import Event, Thread
@@ -67,7 +67,7 @@ Method = Literal[
     "report_asset_materialization",
     "report_asset_check",
     "report_custom_message",
-    "log_stdio",
+    "log_external_stream",
 ]
 
 
@@ -932,12 +932,24 @@ class PipesDefaultMessageWriter(PipesMessageWriter):
     BUFFERED_STDIO_KEY = "buffered_stdio"
     STDERR = "stderr"
     STDOUT = "stdout"
+    INCLUDE_STDIO_IN_MESSAGES_KEY: str = "include_stdio_in_messages"
 
     @contextmanager
     def open(self, params: PipesParams) -> Iterator[PipesMessageWriterChannel]:
         if self.FILE_PATH_KEY in params:
             path = _assert_env_param_type(params, self.FILE_PATH_KEY, str, self.__class__)
-            yield PipesFileMessageWriterChannel(path)
+            channel = PipesFileMessageWriterChannel(path)
+
+            if params.get(self.INCLUDE_STDIO_IN_MESSAGES_KEY):
+                log_writer = PipesDefaultLogWriter(message_channel=channel)
+                maybe_open_log_writer = log_writer.open(
+                    params.get(PipesLogWriter.LOG_WRITER_KEY, {})
+                )
+            else:
+                maybe_open_log_writer = nullcontext()
+
+            with maybe_open_log_writer:
+                yield channel
 
         elif self.STDIO_KEY in params:
             stream = _assert_env_param_type(params, self.STDIO_KEY, str, self.__class__)
@@ -1031,10 +1043,9 @@ class PipesDefaultLogWriterChannel(PipesStdioLogWriterChannel):
         super().__init__(interval=interval, stream=stream, name=name)
 
     def write_chunk(self, chunk: str) -> None:
-        # write the chunk to a file
         self.message_channel.write_message(
             _make_message(
-                method="log_stdio",
+                method="log_external_stream",
                 params={"stream": self.stream, "text": chunk, "extras": {}},
             )
         )
@@ -1043,9 +1054,9 @@ class PipesDefaultLogWriterChannel(PipesStdioLogWriterChannel):
 class PipesDefaultLogWriter(PipesStdioLogWriter):
     """[Experimental] A log writer that writes stdout and stderr via the message writer channel."""
 
-    def __init__(self, interval: float = 1):
+    def __init__(self, message_channel: PipesMessageWriterChannel, interval: float = 1):
         self.interval = interval
-        self._message_channel = None
+        self._message_channel = message_channel
 
         super().__init__()
 
@@ -1055,10 +1066,6 @@ class PipesDefaultLogWriter(PipesStdioLogWriter):
             raise RuntimeError("message_channel is not set")
         else:
             return self._message_channel
-
-    @message_channel.setter
-    def message_channel(self, message_channel: PipesMessageWriterChannel):
-        self._message_channel = message_channel
 
     def make_channel(
         self, params: PipesParams, stream: Literal["stdout", "stderr"]
@@ -1699,10 +1706,12 @@ class PipesContext:
         """
         self._write_message("report_custom_message", {"payload": payload})
 
-    def log_stdio(
+    def log_external_stream(
         self, stream: Literal["stdout", "stderr"], text: str, extras: Optional[PipesExtras] = None
     ):
-        self._write_message("log_stdio", {"stream": stream, "text": text, "extras": extras or {}})
+        self._write_message(
+            "log_external_stream", {"stream": stream, "text": text, "extras": extras or {}}
+        )
 
     @property
     def log(self) -> logging.Logger:
