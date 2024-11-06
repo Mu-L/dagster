@@ -67,6 +67,7 @@ Method = Literal[
     "report_asset_materialization",
     "report_asset_check",
     "report_custom_message",
+    "log_stdio",
 ]
 
 
@@ -1015,6 +1016,61 @@ DAGSTER_PIPES_CONTEXT_ENV_VAR = "DAGSTER_PIPES_CONTEXT"
 DAGSTER_PIPES_MESSAGES_ENV_VAR = "DAGSTER_PIPES_MESSAGES"
 
 
+class PipesDefaultLogWriterChannel(PipesStdioLogWriterChannel):
+    """A log writer channel that writes stdout or stderr via the message writer channel."""
+
+    def __init__(
+        self,
+        message_channel: PipesMessageWriterChannel,
+        stream: Literal["stdout", "stderr"],
+        name: str,
+        interval: float,
+    ):
+        self.message_channel = message_channel
+
+        super().__init__(interval=interval, stream=stream, name=name)
+
+    def write_chunk(self, chunk: str) -> None:
+        # write the chunk to a file
+        self.message_channel.write_message(
+            _make_message(
+                method="log_stdio",
+                params={"stream": self.stream, "text": chunk, "extras": {}},
+            )
+        )
+
+
+class PipesDefaultLogWriter(PipesStdioLogWriter):
+    """[Experimental] A log writer that writes stdout and stderr via the message writer channel."""
+
+    def __init__(self, interval: float = 1):
+        self.interval = interval
+        self._message_channel = None
+
+        super().__init__()
+
+    @property
+    def message_channel(self) -> PipesMessageWriterChannel:
+        if self._message_channel is None:
+            raise RuntimeError("message_channel is not set")
+        else:
+            return self._message_channel
+
+    @message_channel.setter
+    def message_channel(self, message_channel: PipesMessageWriterChannel):
+        self._message_channel = message_channel
+
+    def make_channel(
+        self, params: PipesParams, stream: Literal["stdout", "stderr"]
+    ) -> "PipesDefaultLogWriterChannel":
+        return PipesDefaultLogWriterChannel(
+            message_channel=self.message_channel,
+            stream=stream,
+            name=f"PipesDefaultLogWriterChannel({stream})",
+            interval=self.interval,
+        )
+
+
 class PipesMappingParamsLoader(PipesParamsLoader):
     """Params loader that extracts params from a Mapping provided at init time."""
 
@@ -1642,6 +1698,11 @@ class PipesContext:
             payload (Any): JSON serializable data.
         """
         self._write_message("report_custom_message", {"payload": payload})
+
+    def log_stdio(
+        self, stream: Literal["stdout", "stderr"], text: str, extras: Optional[PipesExtras] = None
+    ):
+        self._write_message("log_stdio", {"stream": stream, "text": text, "extras": extras or {}})
 
     @property
     def log(self) -> logging.Logger:
