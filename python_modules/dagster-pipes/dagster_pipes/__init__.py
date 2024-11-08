@@ -623,10 +623,13 @@ T_BlobStoreMessageWriterChannel = TypeVar(
 
 
 class PipesBlobStoreMessageWriter(PipesMessageWriter[T_BlobStoreMessageWriterChannel]):
+    INCLUDE_STDIO_IN_MESSAGES_KEY: str = "include_stdio_in_messages"
+
     """Message writer channel that periodically uploads message chunks to some blob store endpoint."""
 
     def __init__(self, *, interval: float = 10):
         self.interval = interval
+        self._log_writer = None
 
     @contextmanager
     def open(self, params: PipesParams) -> Iterator[T_BlobStoreMessageWriterChannel]:
@@ -642,7 +645,18 @@ class PipesBlobStoreMessageWriter(PipesMessageWriter[T_BlobStoreMessageWriterCha
         """
         channel = self.make_channel(params)
         with channel.buffered_upload_loop():
-            yield channel
+            if params.get(self.INCLUDE_STDIO_IN_MESSAGES_KEY):
+                log_writer = PipesDefaultLogWriter()
+                log_writer.message_channel = channel
+
+                maybe_open_log_writer = log_writer.open(
+                    params.get(PipesLogWriter.LOG_WRITER_KEY, {})
+                )
+            else:
+                maybe_open_log_writer = nullcontext()
+
+            with maybe_open_log_writer:
+                yield channel
 
     @abstractmethod
     def make_channel(self, params: PipesParams) -> T_BlobStoreMessageWriterChannel: ...
