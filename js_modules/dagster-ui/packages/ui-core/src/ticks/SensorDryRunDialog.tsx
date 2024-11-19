@@ -21,11 +21,11 @@ import styled from 'styled-components';
 import {RunRequestTable} from './DryRunRequestTable';
 import {DynamicPartitionRequests} from './DynamicPartitionRequests';
 import {RUN_REQUEST_FRAGMENT} from './RunRequestFragment';
+import {gql, useMutation} from '../apollo-client';
 import {
   SensorDryRunMutation,
   SensorDryRunMutationVariables,
 } from './types/SensorDryRunDialog.types';
-import {gql, useMutation} from '../apollo-client';
 import {showCustomAlert} from '../app/CustomAlertProvider';
 import {showSharedToaster} from '../app/DomUtils';
 import {PYTHON_ERROR_FRAGMENT} from '../app/PythonErrorFragment';
