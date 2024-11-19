@@ -179,10 +179,13 @@ class TestMultipleLaunch(BaseTestSuite):
             assert "launchMultipleRuns" in result.data
             result_data = result.data["launchMultipleRuns"]
 
-            assert "__typename" in result_data
-            results = result_data["__typename"]
+            assert result_data["__typename"] == "LaunchMultipleRunsResult"
+            assert "launchMultipleRunsResult" in result_data
 
-            assert results == "UnauthorizedError"
+            results = result_data["launchMultipleRunsResult"]
+
+            for result in results:
+                assert result["__typename"] == "UnauthorizedError"
 
 
 class TestFailedLaunch(LaunchFailTestSuite):
@@ -253,10 +256,13 @@ class TestFailedMultipleLaunchReadOnly(ReadOnlyTestSuite):
         assert "launchMultipleRuns" in result.data
         result_data = result.data["launchMultipleRuns"]
 
-        assert "__typename" in result_data
-        results = result_data["__typename"]
+        assert result_data["__typename"] == "LaunchMultipleRunsResult"
+        assert "launchMultipleRunsResult" in result_data
 
-        assert results == "UnauthorizedError"
+        results = result_data["launchMultipleRunsResult"]
+
+        for result in results:
+            assert result["__typename"] == "UnauthorizedError"
 
 
 class TestSuccessAndFailureMultipleLaunch(BaseTestSuite):

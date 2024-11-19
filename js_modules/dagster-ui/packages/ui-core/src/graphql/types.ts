@@ -2216,10 +2216,7 @@ export type LaunchMultipleRunsResult = {
   launchMultipleRunsResult: Array<LaunchRunResult>;
 };
 
-export type LaunchMultipleRunsResultOrError =
-  | LaunchMultipleRunsResult
-  | PythonError
-  | UnauthorizedError;
+export type LaunchMultipleRunsResultOrError = LaunchMultipleRunsResult | PythonError;
 
 export type LaunchPipelineRunSuccess = {
   run: Run;

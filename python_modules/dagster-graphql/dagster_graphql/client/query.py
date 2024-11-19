@@ -387,9 +387,6 @@ mutation($executionParamsList: [ExecutionParams!]!) {
         }
       }
     }
-    ... on UnauthorizedError {
-      message
-    }
     ... on PythonError {
       ...errorFragment
     }

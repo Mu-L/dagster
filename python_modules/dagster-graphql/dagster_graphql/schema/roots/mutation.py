@@ -336,20 +336,8 @@ class GrapheneLaunchMultipleRunsMutation(graphene.Mutation):
         GrapheneLaunchMultipleRunsResult,
         GrapheneError,
         GraphenePythonError,
-        GrapheneUnauthorizedError,
     ]:
         launch_multiple_runs_result = []
-
-        # assert permission
-        for execution_params_dict in executionParamsList:
-            execution_params = create_execution_params(graphene_info, execution_params_dict)
-
-            assert_permission_for_location(
-                graphene_info,
-                Permissions.LAUNCH_PIPELINE_EXECUTION,
-                execution_params.selector.location_name,
-            )
-            # capture_error will catch and return
 
         for execution_params in executionParamsList:
             result = GrapheneLaunchRunMutation.mutate(

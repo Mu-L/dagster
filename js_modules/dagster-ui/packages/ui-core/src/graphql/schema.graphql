@@ -1515,7 +1515,7 @@ type LaunchMultipleRunsMutation {
   Output: LaunchMultipleRunsResultOrError!
 }
 
-union LaunchMultipleRunsResultOrError = LaunchMultipleRunsResult | PythonError | UnauthorizedError
+union LaunchMultipleRunsResultOrError = LaunchMultipleRunsResult | PythonError
 
 type LaunchRunReexecutionMutation {
   Output: LaunchRunReexecutionResult!

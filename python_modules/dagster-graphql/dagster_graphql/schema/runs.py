@@ -16,7 +16,6 @@ from dagster_graphql.schema.errors import (
     GrapheneInvalidPipelineRunsFilterError,
     GraphenePythonError,
     GrapheneRunGroupNotFoundError,
-    GrapheneUnauthorizedError,
 )
 from dagster_graphql.schema.tags import GraphenePipelineTagAndValues
 from dagster_graphql.schema.util import ResolveInfo, non_null_list
@@ -91,7 +90,7 @@ class GrapheneLaunchMultipleRunsResult(graphene.ObjectType):
 
 class GrapheneLaunchMultipleRunsResultOrError(graphene.Union):
     class Meta:
-        types = (GrapheneLaunchMultipleRunsResult, GraphenePythonError, GrapheneUnauthorizedError)
+        types = (GrapheneLaunchMultipleRunsResult, GraphenePythonError)
         name = "LaunchMultipleRunsResultOrError"
 
 
