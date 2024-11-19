@@ -129,49 +129,56 @@ export async function handleLaunchMultipleResult(
     return;
   }
   const successfulRunIds: string[] = [];
+  const failedRunsErrors: {message: string}[] = [];
 
-  // show corresponding toasts
-  const launchMultipleRunsResult = result.launchMultipleRunsResult;
+  if (result.__typename === 'PythonError') {
+    // if launch multiple runs errors out, show the PythonError and return
+    showCustomAlert({
+      title: 'Error',
+      body: <PythonErrorInfo error={result} />,
+    });
+    return;
+  } else if (result.__typename === 'LaunchMultipleRunsResult') {
+    // show corresponding toasts
+    const launchMultipleRunsResult = result.launchMultipleRunsResult;
 
-  for (const individualResult of launchMultipleRunsResult) {
-    if (individualResult.__typename === 'LaunchRunSuccess') {
-      successfulRunIds.push(individualResult.run.id);
+    for (const individualResult of launchMultipleRunsResult) {
+      if (individualResult.__typename === 'LaunchRunSuccess') {
+        successfulRunIds.push(individualResult.run.id);
 
-      const pathname = `/runs/${individualResult.run.id}`;
-      const search = options.preserveQuerystring ? history.location.search : '';
-      const openInSameTab = () => history.push({pathname, search});
+        const pathname = `/runs/${individualResult.run.id}`;
+        const search = options.preserveQuerystring ? history.location.search : '';
+        const openInSameTab = () => history.push({pathname, search});
 
-      // using open with multiple runs will spam new tabs
-      if (options.behavior === 'open') {
-        openInSameTab();
+        // using open with multiple runs will spam new tabs
+        if (options.behavior === 'open') {
+          openInSameTab();
+        }
+        document.dispatchEvent(new CustomEvent('run-launched'));
+      } else if (individualResult.__typename === 'PythonError') {
+        failedRunsErrors.push({message: individualResult.message});
+      } else {
+        let message = `Error launching run.`;
+        if (
+          individualResult &&
+          typeof individualResult === 'object' &&
+          'errors' in individualResult
+        ) {
+          const errors = individualResult.errors as {message: string}[];
+          message += ` Please fix the following errors:\n\n${errors
+            .map((error) => error.message)
+            .join('\n\n')}`;
+        }
+        if (
+          individualResult &&
+          typeof individualResult === 'object' &&
+          'message' in individualResult
+        ) {
+          message += `\n\n${individualResult.message}`;
+        }
+
+        failedRunsErrors.push({message});
       }
-      document.dispatchEvent(new CustomEvent('run-launched'));
-    } else if (individualResult.__typename === 'PythonError') {
-      showCustomAlert({
-        title: 'Error',
-        body: <PythonErrorInfo error={individualResult} />,
-      });
-    } else {
-      let message = `This multiple job launch cannot be executed.`;
-      if (
-        individualResult &&
-        typeof individualResult === 'object' &&
-        'errors' in individualResult
-      ) {
-        const errors = individualResult.errors as {message: string}[];
-        message += ` Please fix the following errors:\n\n${errors
-          .map((error) => error.message)
-          .join('\n\n')}`;
-      }
-      if (
-        individualResult &&
-        typeof individualResult === 'object' &&
-        'message' in individualResult
-      ) {
-        message += `\n\n${individualResult.message}`;
-      }
-
-      showCustomAlert({body: message});
     }
   }
 
@@ -190,6 +197,11 @@ export async function handleLaunchMultipleResult(
       href: history.createHref({pathname: queryString}),
     },
   });
+
+  // show list of errors that occurred
+  if (failedRunsErrors.length > 0) {
+    showCustomAlert({body: failedRunsErrors.map((e) => e.message).join('\n\n')});
+  }
 }
 
 function getBaseExecutionMetadata(run: RunFragment | RunTableRunFragment) {
@@ -333,9 +345,6 @@ export const LAUNCH_MULTIPLE_RUNS_MUTATION = gql`
           }
           ...PythonErrorFragment
         }
-      }
-      ... on UnauthorizedError {
-        message
       }
       ...PythonErrorFragment
     }
