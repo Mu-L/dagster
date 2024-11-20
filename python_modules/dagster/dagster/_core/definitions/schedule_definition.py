@@ -559,7 +559,7 @@ class ScheduleDefinition(IHasInternalInit):
             required_resource_keys=self._raw_required_resource_keys,
             run_config=None,  # run_config, tags, should_execute encapsulated in execution_fn
             run_config_fn=None,
-            tags=None,
+            tags=self.tags,
             tags_fn=None,
             metadata=self.metadata,
             should_execute=None,
