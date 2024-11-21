@@ -97,7 +97,7 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
   );
 
   // mutation to evaluate the schedule
-  const [scheduleDryRunMutation] = useMutation<
+  const [scheduleDryRunMutation, {loading: scheduleDryRunMutationLoading}] = useMutation<
     ScheduleDryRunMutation,
     ScheduleDryRunMutationVariables
   >(SCHEDULE_DRY_RUN_MUTATION);
@@ -111,7 +111,6 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
   const [isTickSelectionOpen, setIsTickSelectionOpen] = useState<boolean>(false);
   const selectedTimestampRef = useRef<{ts: number; label: string} | null>(null);
   const {viewport, containerProps} = useViewport();
-  const [submitting, setSubmitting] = useState(false);
   const [launching, setLaunching] = useState(false);
 
   const [scheduleExecutionError, setScheduleExecutionError] = useState<PythonErrorFragment | null>(
@@ -121,14 +120,14 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
     useState<ScheduleDryRunInstigationTick | null>(null);
 
   const canSubmitTest = useMemo(() => {
-    return getScheduleData && !submitting;
-  }, [getScheduleData, submitting]);
+    return getScheduleData && !scheduleDryRunMutationLoading;
+  }, [getScheduleData, scheduleDryRunMutationLoading]);
 
+  // handle clicking Evaluate button
   const submitTest = useCallback(async () => {
     if (!canSubmitTest) {
       return;
     }
-    setSubmitting(true);
 
     const repositorySelector = repoAddressToSelector(repoAddress);
 
@@ -162,7 +161,6 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
     } else {
       assertUnreachable('scheduleDryRun Mutation returned no data??' as never);
     }
-    setSubmitting(false);
   }, [canSubmitTest, scheduleDryRunMutation, repoAddress, name]);
 
   const executionParamsList = useMemo(
@@ -177,6 +175,7 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
     return executionParamsList != null && executionParamsList.length > 0;
   }, [executionParamsList]);
 
+  // handle clicking Launch all button
   const onLaunchAll = useCallback(async () => {
     if (!canLaunchAll) {
       return;
@@ -215,12 +214,19 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
       );
     }
 
-    // error state after getting schedule data
-    if (
-      getScheduleData.scheduleOrError.__typename === 'PythonError' ||
-      getScheduleData.scheduleOrError.__typename === 'ScheduleNotFoundError'
-    ) {
-      return <div />;
+    // error states after getting schedule data
+    if (getScheduleData.scheduleOrError.__typename === 'PythonError') {
+      return <PythonErrorInfo error={getScheduleData.scheduleOrError} />;
+    }
+
+    if (getScheduleData.scheduleOrError.__typename === 'ScheduleNotFoundError') {
+      return (
+        <NonIdealState
+          icon="error"
+          title="Schedule not found"
+          description={`Could not find a schedule named: ${name}`}
+        />
+      );
     }
 
     // handle showing results page after clicking Evaluate
@@ -238,7 +244,7 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
     }
 
     // loading state for evaluating
-    if (submitting) {
+    if (scheduleDryRunMutationLoading) {
       return (
         <Box flex={{direction: 'row', gap: 8, justifyContent: 'center', alignItems: 'center'}}>
           <Spinner purpose="body-text" />
@@ -300,7 +306,7 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
     getScheduleData,
     scheduleExecutionData,
     scheduleExecutionError,
-    submitting,
+    scheduleDryRunMutationLoading,
     repoAddress,
     name,
     jobName,
@@ -345,7 +351,7 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
       );
     }
 
-    if (submitting) {
+    if (scheduleDryRunMutationLoading) {
       return (
         <Box flex={{direction: 'row', gap: 8}}>
           <Button onClick={onClose}>Cancel</Button>
@@ -377,7 +383,7 @@ const EvaluateSchedule = ({repoAddress, name, onClose, jobName}: Props) => {
     scheduleExecutionData,
     scheduleExecutionError,
     submitTest,
-    submitting,
+    scheduleDryRunMutationLoading,
   ]);
 
   return (
