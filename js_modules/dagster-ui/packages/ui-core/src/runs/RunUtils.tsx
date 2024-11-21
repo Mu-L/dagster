@@ -154,7 +154,6 @@ export async function handleLaunchMultipleResult(
         if (options.behavior === 'open') {
           openInSameTab();
         }
-        document.dispatchEvent(new CustomEvent('run-launched'));
       } else if (individualResult.__typename === 'PythonError') {
         failedRunsErrors.push({message: individualResult.message});
       } else {
@@ -181,6 +180,7 @@ export async function handleLaunchMultipleResult(
       }
     }
   }
+  document.dispatchEvent(new CustomEvent('run-launched'));
 
   // link to runs page filtered to run IDs
   const params = new URLSearchParams();
