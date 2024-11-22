@@ -168,7 +168,8 @@ class SensorLaunchContext(AbstractContextManager):
         if skip_reason:
             self._tick = self._tick.with_reason(skip_reason=skip_reason)
 
-        if cursor:
+        # do not write tick data for AutomationConditionSensorDefinitions
+        if cursor and self._remote_sensor.sensor_type != SensorType.AUTOMATION:
             self._tick = self._tick.with_cursor(cursor)
 
         if origin_run_id:
