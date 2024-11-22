@@ -23,7 +23,7 @@ DEFAULT_REEXECUTION_POLICY = ReexecutionStrategy.FROM_FAILURE
 
 
 def filter_runs_to_should_retry(
-    runs: Sequence[DagsterRun], instance: DagsterInstance, default_max_retries: int
+    runs: Sequence[DagsterRun], instance: DagsterInstance
 ) -> Iterator[Tuple[DagsterRun, int]]:
     """Return only runs that should retry along with their retry number (1st retry, 2nd, etc.)."""
     for run in runs:
@@ -154,7 +154,10 @@ def consume_new_runs_for_automatic_reexecution(
     for run, retry_number in filter_runs_to_should_retry(
         [cast(DagsterRun, run_record.dagster_run) for run_record in run_records],
         workspace_process_context.instance,
+<<<<<<< HEAD
         workspace_process_context.instance.run_retries_max_retries,
+=======
+>>>>>>> c821a26daa (remove max retries param)
     ):
         yield
 

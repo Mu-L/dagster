@@ -59,7 +59,7 @@ def test_filter_runs_to_should_retry(instance):
 
         run = create_run(instance, status=DagsterRunStatus.STARTED)
 
-        assert list(filter_runs_to_should_retry([run], instance, max_retries_setting)) == []
+        assert list(filter_runs_to_should_retry([run], instance)) == []
 
         dagster_event = DagsterEvent(
             event_type_value=DagsterEventType.PIPELINE_FAILURE.value,
@@ -86,7 +86,6 @@ def test_filter_runs_to_should_retry(instance):
                     filter_runs_to_should_retry(
                         instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                         instance,
-                        max_retries_setting,
                     )
                 )
             )
@@ -108,7 +107,7 @@ def test_filter_runs_no_retry_on_asset_or_op_failure(instance_no_retry_on_asset_
 
         run = create_run(instance, status=DagsterRunStatus.STARTED, tags={MAX_RETRIES_TAG: "2"})
 
-        assert list(filter_runs_to_should_retry([run], instance, max_retries_setting)) == []
+        assert list(filter_runs_to_should_retry([run], instance)) == []
 
         dagster_event = DagsterEvent(
             event_type_value=DagsterEventType.PIPELINE_FAILURE.value,
@@ -130,7 +129,6 @@ def test_filter_runs_no_retry_on_asset_or_op_failure(instance_no_retry_on_asset_
                     filter_runs_to_should_retry(
                         instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                         instance,
-                        max_retries_setting,
                     )
                 )
             )
@@ -169,7 +167,6 @@ def test_filter_runs_no_retry_on_asset_or_op_failure(instance_no_retry_on_asset_
                     filter_runs_to_should_retry(
                         instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                         instance,
-                        max_retries_setting,
                     )
                 )
             )
@@ -200,7 +197,6 @@ def test_filter_runs_no_retry_on_asset_or_op_failure(instance_no_retry_on_asset_
             filter_runs_to_should_retry(
                 instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                 instance,
-                max_retries_setting,
             )
         )
         assert len(runs_to_retry) == 1
@@ -220,7 +216,7 @@ def test_filter_runs_to_should_retry_tags(instance):
 
         run = create_run(instance, status=DagsterRunStatus.STARTED, tags={MAX_RETRIES_TAG: "0"})
 
-        assert list(filter_runs_to_should_retry([run], instance, max_retries_setting)) == []
+        assert list(filter_runs_to_should_retry([run], instance)) == []
 
         instance.report_run_failed(run)
         run = instance.get_run_by_id(run.run_id)
@@ -233,7 +229,6 @@ def test_filter_runs_to_should_retry_tags(instance):
                     filter_runs_to_should_retry(
                         instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                         instance,
-                        max_retries_setting,
                     )
                 )
             )
@@ -253,7 +248,7 @@ def test_filter_runs_to_should_retry_tags(instance):
 
         run = create_run(instance, status=DagsterRunStatus.STARTED, tags={MAX_RETRIES_TAG: "10"})
 
-        assert list(filter_runs_to_should_retry([run], instance, max_retries_setting)) == []
+        assert list(filter_runs_to_should_retry([run], instance)) == []
 
         instance.report_run_failed(run)
         run = instance.get_run_by_id(run.run_id)
@@ -266,7 +261,6 @@ def test_filter_runs_to_should_retry_tags(instance):
                     filter_runs_to_should_retry(
                         instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                         instance,
-                        max_retries_setting,
                     )
                 )
             )
@@ -288,7 +282,7 @@ def test_filter_runs_to_should_retry_tags(instance):
             instance, status=DagsterRunStatus.STARTED, tags={MAX_RETRIES_TAG: "not-an-int"}
         )
 
-        assert list(filter_runs_to_should_retry([run], instance, max_retries_setting)) == []
+        assert list(filter_runs_to_should_retry([run], instance)) == []
 
         instance.report_run_failed(run)
         run = instance.get_run_by_id(run.run_id)
@@ -300,7 +294,6 @@ def test_filter_runs_to_should_retry_tags(instance):
                 filter_runs_to_should_retry(
                     instance.get_runs(filters=RunsFilter(statuses=[DagsterRunStatus.FAILURE])),
                     instance,
-                    max_retries_setting,
                 )
             )
             == []
