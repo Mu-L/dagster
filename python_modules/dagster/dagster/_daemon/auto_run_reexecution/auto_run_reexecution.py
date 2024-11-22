@@ -1,6 +1,7 @@
 import sys
 from typing import Iterator, Optional, Sequence, Tuple, cast
 
+import dagster._check as check
 from dagster._core.definitions.metadata import MetadataValue
 from dagster._core.definitions.selector import JobSubsetSelector
 from dagster._core.events import EngineEventData, RunFailureReason
@@ -28,10 +29,15 @@ def filter_runs_to_should_retry(
     """Return only runs that should retry along with their retry number (1st retry, 2nd, etc.)."""
     for run in runs:
         if get_boolean_tag_value(run.tags.get(WILL_RETRY_TAG), default_value=False):
-            if not get_boolean_tag_value(run.tags.get(DID_RETRY_TAG), default_value=False):
-                retry_number = int(run.tags.get(RETRY_NUMBER_TAG, "0")) + 1
-                yield (run, retry_number)
+            if run.tags.get(AUTO_RETRY_RUN_ID) is None:
+                _, run_group = check.not_none(instance.get_run_group(run.run_id))
+                yield (run, len(list(run_group)))
         else:
+            # ensure that we are only reporting this engine event on runs that failed,
+            # (not runs that succeeded and therefore have no WILL_RETRY_TAG set) and also have
+            # retry_on_asset_or_op_failure set to false
+            if run.tags.get(WILL_RETRY_TAG) is None:
+                return
             retry_on_asset_or_op_failure = get_boolean_tag_value(
                 run.tags.get(RETRY_ON_ASSET_OR_OP_FAILURE_TAG),
                 default_value=instance.run_retries_retry_on_asset_or_op_failure,
