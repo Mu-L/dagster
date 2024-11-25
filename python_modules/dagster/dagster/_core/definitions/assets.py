@@ -85,6 +85,10 @@ if TYPE_CHECKING:
 ASSET_SUBSET_INPUT_PREFIX = "__subset_input__"
 
 
+def stringify_asset_key_to_input_name(asset_key: AssetKey) -> str:
+    return "_".join(asset_key.path).replace("-", "_")
+
+
 class AssetsDefinition(ResourceAddable, IHasInternalInit):
     """Defines a set of assets that are produced by the same op or graph.
 
@@ -1286,6 +1290,7 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
 
     def map_asset_specs(self, fn: Callable[[AssetSpec], AssetSpec]) -> "AssetsDefinition":
         mapped_specs = []
+        additional_deps_per_key: Dict[AssetKey, Set[AssetDep]] = {}
         for spec in self.specs:
             mapped_spec = fn(spec)
             if mapped_spec.key != spec.key:
@@ -1293,19 +1298,27 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
                     f"Asset key {spec.key.to_user_string()} was changed to "
                     f"{mapped_spec.key.to_user_string()}. Mapping function must not change keys."
                 )
-            if (
-                # check reference equality first for performance
-                mapped_spec.deps is not spec.deps and mapped_spec.deps != spec.deps
-            ):
-                raise DagsterInvalidDefinitionError(
-                    f"Asset deps {spec.deps} were changed to {mapped_spec.deps}. Mapping function "
-                    "must not change deps."
-                )
+
+            deps_per_key = defaultdict(list)
+            for dep in mapped_spec.deps:
+                deps_per_key[dep.asset_key].append(dep)
+            for dep in spec.deps:
+                if dep.asset_key not in deps_per_key:
+                    raise DagsterInvalidDefinitionError(
+                        f"After mapping, asset {dep.asset_key.to_user_string()} was not found in the mapped dependencies. You should not remove dependencies from assets, since that can destroy the internal structure of the asset."
+                    )
+
+            additional_deps_per_key[spec.key] = set(mapped_spec.deps) - set(spec.deps)
 
             mapped_specs.append(mapped_spec)
 
-        return self.__class__.dagster_internal_init(
+        assets_def_new_specs = self.__class__.dagster_internal_init(
             **{**self.get_attributes_dict(), "specs": mapped_specs}
+        )
+        return (
+            _thread_deps_to_node(assets_def_new_specs, additional_deps_per_key)
+            if assets_def_new_specs.is_executable and additional_deps_per_key
+            else assets_def_new_specs
         )
 
     def subset_for(
@@ -1897,3 +1910,74 @@ def unique_id_from_asset_and_check_keys(entity_keys: Iterable["EntityKey"]) -> s
     """
     sorted_key_strs = sorted(str(key) for key in entity_keys)
     return non_secure_md5_hash_str(json.dumps(sorted_key_strs).encode("utf-8"))[:8]
+
+
+def _thread_deps_to_node(
+    assets_def: AssetsDefinition, additional_deps: Mapping[AssetKey, AbstractSet[AssetDep]]
+) -> "AssetsDefinition":
+    """This function threads additional AssetDep objects into the node definition of the
+    AssetsDefinition. It assumes that the deps have already been added to the AssetSpecs of the AssetsDefinition, and purely handles mapping those deps to inputs on the op.
+    """
+    from dagster._builtins import Nothing
+    from dagster._core.definitions.input import In
+
+    check.invariant(
+        assets_def.is_executable, "Cannot thread deps to node for non-executable asset."
+    )
+    if not isinstance(assets_def.node_def, OpDefinition):
+        raise DagsterInvalidDefinitionError("Cannot add dependencies to a graph-backed asset")
+    dep_key_by_input_name = {
+        stringify_asset_key_to_input_name(dep.asset_key): dep.asset_key
+        for deps in additional_deps.values()
+        for dep in deps
+    }
+
+    complete_input_names_by_key = {
+        **assets_def.node_keys_by_input_name,
+        **dep_key_by_input_name,
+    }
+
+    additional_ins = {
+        input_name: In(dagster_type=Nothing) for input_name in dep_key_by_input_name.keys()
+    }
+
+    ins_from_input_defs = {
+        input_def.name: In.from_definition(input_def)
+        for input_def in assets_def.op.input_dict.values()
+    }
+    all_ins = {**ins_from_input_defs, **additional_ins}
+    new_op = assets_def.op.with_replaced_properties(
+        name=assets_def.op.name,
+        ins=all_ins,
+    )
+    additional_deps_keys = {
+        key: {dep.asset_key for dep in deps} for key, deps in additional_deps.items()
+    }
+    complete_deps = {}
+    for key in {*assets_def.asset_deps.keys(), *additional_deps_keys.keys()}:
+        complete_deps[key] = {
+            *assets_def.asset_deps.get(key, set()),
+            *additional_deps_keys.get(key, set()),
+        }
+    return AssetsDefinition(
+        keys_by_input_name=complete_input_names_by_key,
+        keys_by_output_name=assets_def.keys_by_output_name,
+        node_def=new_op,
+        partitions_def=assets_def.partitions_def,
+        asset_deps=complete_deps,
+        can_subset=assets_def.can_subset,
+        resource_defs=assets_def.resource_defs,
+        group_names_by_key=assets_def.group_names_by_key,
+        metadata_by_key=assets_def.metadata_by_key,
+        tags_by_key=assets_def.tags_by_key,
+        freshness_policies_by_key=assets_def.freshness_policies_by_key,
+        backfill_policy=assets_def.backfill_policy,
+        descriptions_by_key=assets_def.descriptions_by_key,
+        check_specs_by_output_name=assets_def.check_specs_by_output_name,
+        is_subset=assets_def.is_subset,
+        owners_by_key=assets_def.owners_by_key,
+        partition_mappings=assets_def._partition_mappings,  # noqa: SLF001
+        specs=None,
+        execution_type=assets_def.execution_type,
+        auto_materialize_policies_by_key=assets_def.auto_materialize_policies_by_key,
+    )
