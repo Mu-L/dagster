@@ -29,8 +29,8 @@ def filter_runs_to_should_retry(
 ) -> Iterator[Tuple[DagsterRun, int]]:
     """Return only runs that should retry along with their retry number (1st retry, 2nd, etc.)."""
     for run in runs:
-        should_retry_run = run.tags.get(WILL_RETRY_TAG)
-        if should_retry_run is None:
+        will_retry_tag_value = run.tags.get(WILL_RETRY_TAG)
+        if will_retry_tag_value is None:
             # If the run doesn't have the WILL_RETRY_TAG, and the run is failed, we should
             # recalculate if the run should be retried to ensure backward compatibilty
             if run.status == DagsterRunStatus.FAILURE:
@@ -40,7 +40,8 @@ def filter_runs_to_should_retry(
             else:
                 # run is not failed, move on to the next run
                 continue
-        should_retry_run = get_boolean_tag_value(should_retry_run, default_value=False)
+        else:
+            should_retry_run = get_boolean_tag_value(will_retry_tag_value, default_value=False)
         if should_retry_run:
             if run.tags.get(AUTO_RETRY_RUN_ID_TAG) is None:
                 _, run_group = check.not_none(instance.get_run_group(run.run_id))
