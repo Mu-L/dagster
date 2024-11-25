@@ -6,8 +6,9 @@ from dagster._core.definitions.metadata import MetadataValue
 from dagster._core.definitions.selector import JobSubsetSelector
 from dagster._core.events import EngineEventData, RunFailureReason
 from dagster._core.execution.plan.resume_retry import ReexecutionStrategy
+from dagster._core.execution.retries import auto_reexecution_should_retry_run
 from dagster._core.instance import DagsterInstance
-from dagster._core.storage.dagster_run import DagsterRun, RunRecord
+from dagster._core.storage.dagster_run import DagsterRun, DagsterRunStatus, RunRecord
 from dagster._core.storage.tags import (
     AUTO_RETRY_RUN_ID_TAG,
     RETRY_NUMBER_TAG,
@@ -28,16 +29,23 @@ def filter_runs_to_should_retry(
 ) -> Iterator[Tuple[DagsterRun, int]]:
     """Return only runs that should retry along with their retry number (1st retry, 2nd, etc.)."""
     for run in runs:
-        if get_boolean_tag_value(run.tags.get(WILL_RETRY_TAG), default_value=False):
-            if run.tags.get(AUTO_RETRY_RUN_ID) is None:
+        should_retry_run = run.tags.get(WILL_RETRY_TAG)
+        if should_retry_run is None:
+            # If the run doesn't have the WILL_RETRY_TAG, and the run is failed, we should
+            # recalculate if the run should be retried to ensure backward compatibilty
+            if run.status == DagsterRunStatus.FAILURE:
+                should_retry_run = auto_reexecution_should_retry_run(instance, run)
+                # add the tag to the run so that it can be used in other parts of the system
+                instance.add_run_tags(run.run_id, {WILL_RETRY_TAG: str(should_retry_run)})
+            else:
+                # run is not failed, move on to the next run
+                continue
+        should_retry_run = get_boolean_tag_value(should_retry_run, default_value=False)
+        if should_retry_run:
+            if run.tags.get(AUTO_RETRY_RUN_ID_TAG) is None:
                 _, run_group = check.not_none(instance.get_run_group(run.run_id))
                 yield (run, len(list(run_group)))
         else:
-            # ensure that we are only reporting this engine event on runs that failed,
-            # (not runs that succeeded and therefore have no WILL_RETRY_TAG set) and also have
-            # retry_on_asset_or_op_failure set to false
-            if run.tags.get(WILL_RETRY_TAG) is None:
-                return
             retry_on_asset_or_op_failure = get_boolean_tag_value(
                 run.tags.get(RETRY_ON_ASSET_OR_OP_FAILURE_TAG),
                 default_value=instance.run_retries_retry_on_asset_or_op_failure,
