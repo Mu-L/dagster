@@ -16,4 +16,9 @@ def nested_asset():
     return "nested_asset_value"
 
 
-defs = Definitions(assets=[some_asset, other_asset, nested_asset])
+@asset(key=["string", "interpretation"])
+def string_interpretation():
+    return "string_interpretation_value"
+
+
+defs = Definitions(assets=[some_asset, other_asset, nested_asset, string_interpretation])
