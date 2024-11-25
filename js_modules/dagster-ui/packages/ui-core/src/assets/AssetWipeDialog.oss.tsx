@@ -53,7 +53,7 @@ export const AssetWipeDialogInner = memo(
     onComplete?: () => void;
     requery?: RefetchQueriesFunction;
   }) => {
-    const {wipeAssets, isWiping, isDone, wipedCount, failedCount} = useWipeAssets({
+    const {wipeAssets, backgroundWipeAssets, isWiping, isDone, wipedCount, failedCount} = useWipeAssets({
       refetchQueries: requery,
       onClose,
       onComplete,
@@ -104,7 +104,7 @@ export const AssetWipeDialogInner = memo(
           {isDone ? null : (
             <Button
               intent="danger"
-              onClick={() => wipeAssets(assetKeys.map((key) => asAssetPartitionRangeInput(key)))}
+              onClick={() => backgroundWipeAssets(assetKeys.map((key) => asAssetPartitionRangeInput(key)))}
               disabled={isWiping}
               loading={isWiping}
             >
