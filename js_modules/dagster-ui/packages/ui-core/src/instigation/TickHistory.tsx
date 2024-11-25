@@ -12,6 +12,7 @@ import {
   IconWrapper,
   Menu,
   MenuItem,
+  MiddleTruncate,
   NonIdealState,
   Select,
   Spinner,
@@ -30,7 +31,7 @@ import {LiveTickTimeline} from './LiveTickTimeline2';
 import {TickDetailsDialog} from './TickDetailsDialog';
 import {HistoryTickFragment} from './types/InstigationUtils.types';
 import {TickHistoryQuery, TickHistoryQueryVariables} from './types/TickHistory.types';
-import {countPartitionsAddedOrDeleted, isStuckStartedTick, truncate} from './util';
+import {countPartitionsAddedOrDeleted, isStuckStartedTick} from './util';
 import {gql, useQuery} from '../apollo-client';
 import {showSharedToaster} from '../app/DomUtils';
 import {PYTHON_ERROR_FRAGMENT} from '../app/PythonErrorFragment';
@@ -163,7 +164,6 @@ export const TicksTable = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticks, queryResult.loading, paginationProps.hasPrevCursor]);
 
-  const [logTick, setLogTick] = React.useState<InstigationTick>();
   const {data} = queryResult;
 
   if (!data) {
@@ -194,13 +194,6 @@ export const TicksTable = ({
 
   return (
     <>
-      {logTick ? (
-        <TickLogDialog
-          tick={logTick}
-          instigationSelector={instigationSelector}
-          onClose={() => setLogTick(undefined)}
-        />
-      ) : null}
       <Box padding={{vertical: 12, horizontal: 24}}>
         <Box flex={{direction: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
           {tabs}
@@ -220,6 +213,7 @@ export const TicksTable = ({
                 <th style={{width: 120}}>Cursor</th>
               ) : null}
               <th style={{width: 180}}>Result</th>
+              <th style={{width: 80}}>Logs</th>
             </tr>
           </thead>
           <tbody>
@@ -417,6 +411,7 @@ function TickRow({
 }) {
   const copyToClipboard = useCopyToClipboard();
   const [showResults, setShowResults] = React.useState(false);
+  const [showLogs, setShowLogs] = React.useState(false);
 
   const [addedPartitions, deletedPartitions] = React.useMemo(() => {
     const requests = tick.dynamicPartitionsRequestResults;
@@ -459,11 +454,18 @@ function TickRow({
         )}
       </td>
       {tick.instigationType === InstigationType.SENSOR ? (
-        <td style={{width: 120}}>
+        <td>
           {tick.cursor ? (
             <Box flex={{direction: 'row', alignItems: 'center', gap: 8}}>
-              <div style={{fontFamily: FontFamily.monospace, fontSize: '14px'}}>
-                {truncate(tick.cursor || '')}
+              <div
+                style={{
+                  fontFamily: FontFamily.monospace,
+                  fontSize: '14px',
+                  maxWidth: '400px',
+                  overflow: 'hidden',
+                }}
+              >
+                <MiddleTruncate text={tick.cursor || ''} />
               </div>
               <CopyButton
                 onClick={async () => {
@@ -535,6 +537,15 @@ function TickRow({
             }}
           />
         </Box>
+      </td>
+      <td>
+        <Button onClick={() => setShowLogs(true)}>View logs</Button>
+        <TickLogDialog
+          isOpen={showLogs}
+          tick={tick}
+          instigationSelector={instigationSelector}
+          onClose={() => setShowLogs(false)}
+        />
       </td>
     </tr>
   );
