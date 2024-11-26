@@ -6,6 +6,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import (
     TYPE_CHECKING,
+    Any,
     ClassVar,
     Dict,
     Final,
@@ -17,9 +18,11 @@ from typing import (
     Union,
 )
 
+from pydantic import BaseModel, TypeAdapter
 from typing_extensions import Self
 
 import dagster._check as check
+from dagster._core.definitions.asset_key import AssetKey
 from dagster._core.definitions.asset_spec import AssetSpec
 from dagster._core.errors import DagsterError
 from dagster._utils import snakecase
@@ -43,13 +46,54 @@ class Component(ABC):
     def build_defs(self, context: "ComponentLoadContext") -> "Definitions": ...
 
 
-class AssetsComponent(Component):
+class LoadableComponent(Component):
+    config_schema: ClassVar[Optional[Type[BaseModel]]] = None
+
+    @classmethod
+    @abstractmethod
+    def from_config(cls, path: Path, config: Mapping[str, Any]) -> Self: ...
+
+
+class AssetSpecModel(BaseModel):
+    key: str
+    deps: Sequence[str] = []
+    description: Optional[str] = None
+    metadata: Mapping[str, Any] = {}
+    group_name: Optional[str] = None
+    skippable: bool = False
+    code_version: Optional[str] = None
+    owners: Sequence[str] = []
+    tags: Mapping[str, str] = {}
+
+    def to_asset_spec(self) -> AssetSpec:
+        return AssetSpec(
+            **{
+                **self.__dict__,
+                "key": AssetKey.from_user_string(self.key),
+            },
+        )
+
+
+class AssetSpecsModel(BaseModel):
+    specs: Optional[Sequence[AssetSpecModel]] = None
+
+    def to_asset_specs(self) -> Optional[Sequence[AssetSpec]]:
+        return [spec_model.to_asset_spec() for spec_model in self.specs] if self.specs else None
+
+
+class AssetsComponent(LoadableComponent):
+    config_schema: ClassVar[Type[AssetSpecsModel]] = AssetSpecsModel
     path: Path
     specs: Sequence[AssetSpec]
 
     def __init__(self, path: Union[str, Path], specs: Optional[Sequence[AssetSpec]] = None):
         self.path = Path(path)
         self.specs = specs or [AssetSpec(key=self.path.stem)]
+
+    @classmethod
+    def from_config(cls, path: Path, config: Mapping[str, Any]) -> Self:
+        loaded_config = TypeAdapter(cls.config_schema).validate_python(config)
+        return cls(path=path, specs=loaded_config.to_asset_specs())
 
 
 class ComponentCollection(Component):
