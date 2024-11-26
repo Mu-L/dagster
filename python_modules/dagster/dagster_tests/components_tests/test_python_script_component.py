@@ -13,6 +13,7 @@ from dagster._core.pipes.subprocess import PipesSubprocessClient
 LOCATION_PATH = Path(__file__).parent / "code_locations" / "python_script_location"
 init_context = ComponentInitContext()
 init_context.registry.register("python_script", PythonScript)
+init_context.registry.register("collection", ComponentCollection)
 
 
 def _assert_assets(component: Component, expected_assets: int) -> None:
@@ -67,7 +68,7 @@ def test_collection_config() -> None:
     component = ComponentCollection.from_config(
         path=LOCATION_PATH / "scripts",
         config={
-            "component_name": "python_script",
+            "component_type": "python_script",
             "components": {
                 "script_one": {
                     "specs": [
@@ -81,3 +82,10 @@ def test_collection_config() -> None:
         context=init_context,
     )
     _assert_assets(component, 6)
+
+
+def test_collection_from_path() -> None:
+    components = init_context.load(LOCATION_PATH)
+    assert len(components) == 1
+
+    _assert_assets(components[0], 6)

@@ -1,7 +1,9 @@
 import importlib.util
+import itertools
 import os
 import sys
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import (
@@ -26,7 +28,9 @@ import dagster._check as check
 from dagster._core.definitions.asset_key import AssetKey
 from dagster._core.definitions.asset_spec import AssetSpec
 from dagster._core.errors import DagsterError
+from dagster._model import DagsterModel
 from dagster._utils import snakecase
+from dagster._utils.pydantic_yaml import parse_yaml_file_to_pydantic
 
 if TYPE_CHECKING:
     from dagster._core.definitions.definitions_class import Definitions
@@ -106,7 +110,7 @@ class AssetsComponent(LoadableComponent):
 
 
 class ComponentCollectionModel(BaseModel):
-    component_name: str
+    component_type: str
     components: Mapping[str, Any] = {}
 
 
@@ -132,7 +136,7 @@ class ComponentCollection(LoadableComponent):
     ) -> "ComponentCollection":
         loaded_config = TypeAdapter(cls.config_schema).validate_python(config)
         component_type = cast(
-            Type[LoadableComponent], context.registry.get(loaded_config.component_name)
+            Type[LoadableComponent], context.registry.get(loaded_config.component_type)
         )
         check.invariant(issubclass(component_type, LoadableComponent))
         return cls(
@@ -310,11 +314,42 @@ class ComponentLoadContext:
         self.resources = resources
 
 
-class ComponentInitContext:
-    registry: ComponentRegistry
+class DefsFileModel(BaseModel):
+    component_type: str
+    config: Optional[Mapping[str, Any]] = None
 
-    def __init__(self):
-        self.registry = ComponentRegistry()
+
+@dataclass
+class ComponentInitContext:
+    registry: ComponentRegistry = field(default_factory=lambda: ComponentRegistry())
+    active_type: Optional[Type[LoadableComponent]] = None
+    config: Optional[Mapping[str, Any]] = None
+
+    def add_context(self, path: Path) -> "ComponentInitContext":
+        defs_path = path / "defs.yml"
+        if defs_path.exists():
+            parsed_config = parse_yaml_file_to_pydantic(
+                DefsFileModel, defs_path.read_text(), str(path)
+            )
+            return ComponentInitContext(
+                active_type=cast(
+                    Type[LoadableComponent], self.registry.get(parsed_config.component_type)
+                ),
+                registry=self.registry,
+                config=parsed_config.config,
+            )
+        else:
+            return self
+
+    def load(self, path: Path) -> Sequence[Component]:
+        context = self.add_context(path)
+        if context.active_type:
+            return [
+                context.active_type.from_config(p, context.config or {}, self)
+                for p in context.active_type.loadable_paths(path)
+            ]
+        else:
+            return list(itertools.chain(*(context.load(p) for p in path.iterdir() if p.is_dir())))
 
 
 def register_components_in_module(registry: ComponentRegistry, root_module: ModuleType) -> None:
