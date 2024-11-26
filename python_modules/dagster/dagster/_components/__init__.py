@@ -16,6 +16,7 @@ from typing import (
     Sequence,
     Type,
     Union,
+    cast,
 )
 
 from pydantic import BaseModel, TypeAdapter
@@ -51,7 +52,13 @@ class LoadableComponent(Component):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, path: Path, config: Mapping[str, Any]) -> Self: ...
+    def from_config(
+        cls, path: Path, config: Mapping[str, Any], context: "ComponentInitContext"
+    ) -> Self: ...
+
+    @classmethod
+    def loadable_paths(cls, path: Path) -> Sequence[Path]:
+        return [path]
 
 
 class AssetSpecModel(BaseModel):
@@ -91,13 +98,24 @@ class AssetsComponent(LoadableComponent):
         self.specs = specs or [AssetSpec(key=self.path.stem)]
 
     @classmethod
-    def from_config(cls, path: Path, config: Mapping[str, Any]) -> Self:
+    def from_config(
+        cls, path: Path, config: Mapping[str, Any], context: "ComponentInitContext"
+    ) -> Self:
         loaded_config = TypeAdapter(cls.config_schema).validate_python(config)
         return cls(path=path, specs=loaded_config.to_asset_specs())
 
 
-class ComponentCollection(Component):
-    def __init__(self, component_type: Type[Component], components: Sequence[Component]):
+class ComponentCollectionModel(BaseModel):
+    component_name: str
+    components: Mapping[str, Any] = {}
+
+
+class ComponentCollection(LoadableComponent):
+    config_schema: ClassVar[Type[ComponentCollectionModel]] = ComponentCollectionModel
+
+    def __init__(
+        self, component_type: Type[LoadableComponent], components: Sequence[LoadableComponent]
+    ):
         self.component_type = component_type
         self.components = check.list_param(components, "components", of_type=component_type)
 
@@ -106,6 +124,23 @@ class ComponentCollection(Component):
 
         return Definitions.merge(
             *(component.build_defs(load_context) for component in self.components)
+        )
+
+    @classmethod
+    def from_config(
+        cls, path: Path, config: Mapping[str, Any], context: "ComponentInitContext"
+    ) -> "ComponentCollection":
+        loaded_config = TypeAdapter(cls.config_schema).validate_python(config)
+        component_type = cast(
+            Type[LoadableComponent], context.registry.get(loaded_config.component_name)
+        )
+        check.invariant(issubclass(component_type, LoadableComponent))
+        return cls(
+            component_type=component_type,
+            components=[
+                component_type.from_config(p, loaded_config.components.get(p.stem, {}), context)
+                for p in component_type.loadable_paths(path)
+            ],
         )
 
 
@@ -250,11 +285,6 @@ class CodeLocationProjectContext:
         )
 
 
-class ComponentLoadContext:
-    def __init__(self, resources: Mapping[str, object] = {}):
-        self.resources = resources
-
-
 class ComponentRegistry:
     def __init__(self):
         self._components: Dict[str, Type[Component]] = {}
@@ -273,6 +303,18 @@ class ComponentRegistry:
 
     def __repr__(self):
         return f"<ComponentRegistry {list(self._components.keys())}>"
+
+
+class ComponentLoadContext:
+    def __init__(self, resources: Mapping[str, object] = {}):
+        self.resources = resources
+
+
+class ComponentInitContext:
+    registry: ComponentRegistry
+
+    def __init__(self):
+        self.registry = ComponentRegistry()
 
 
 def register_components_in_module(registry: ComponentRegistry, root_module: ModuleType) -> None:

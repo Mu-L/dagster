@@ -1,4 +1,6 @@
 import shutil
+from pathlib import Path
+from typing import Sequence
 
 from dagster._components import AssetsComponent, ComponentLoadContext
 from dagster._core.definitions.decorators.asset_decorator import multi_asset
@@ -8,6 +10,10 @@ from dagster._core.pipes.subprocess import PipesSubprocessClient
 
 
 class PythonScript(AssetsComponent):
+    @classmethod
+    def loadable_paths(cls, path: Path) -> Sequence[Path]:
+        return list(path.rglob("*.py"))
+
     def build_defs(self, load_context: ComponentLoadContext) -> Definitions:
         @multi_asset(specs=self.specs, name=f"script_{self.path.stem}")
         def _asset(context: AssetExecutionContext, pipes_client: PipesSubprocessClient):
