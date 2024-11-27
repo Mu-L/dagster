@@ -10,6 +10,7 @@ from dagster import (
     Field,
     Noneable,
     Permissive,
+    Shape,
     StringSource,
     _check as check,
 )
@@ -71,7 +72,7 @@ class AzureBlobComputeLogManager(CloudStorageComputeLogManager, ConfigurableClas
         self,
         storage_account,
         container,
-        secret_key=None,
+        secret_credentials,
         local_dir=None,
         inst_data: Optional[ConfigurableClassData] = None,
         prefix="dagster",
@@ -84,11 +85,11 @@ class AzureBlobComputeLogManager(CloudStorageComputeLogManager, ConfigurableClas
         self._default_azure_credential = check.opt_dict_param(
             default_azure_credential, "default_azure_credential"
         )
-        check.opt_dict_param(secret_key, "secret_key")
+        check.dict_param(secret_credentials, "secret_credentials")
 
-        if secret_key is not None:
+        if secret_credentials is not None:
             self._blob_client = create_blob_client(
-                storage_account, ClientSecretCredential(**secret_key)
+                storage_account, ClientSecretCredential(**secret_credentials)
             )
         else:
             credential = DefaultAzureCredential(**self._default_azure_credential)
@@ -121,7 +122,19 @@ class AzureBlobComputeLogManager(CloudStorageComputeLogManager, ConfigurableClas
         return {
             "storage_account": StringSource,
             "container": StringSource,
-            "secret_key": Field(Noneable(Permissive()), is_required=False, default_value=None),
+            "secret_credentials": Field(
+                Noneable(
+                    Shape(
+                        {
+                            "client_id": StringSource,
+                            "client_secret": StringSource,
+                            "tenant_id": StringSource,
+                        }
+                    )
+                ),
+                is_required=False,
+                default_value=None,
+            ),
             "default_azure_credential": Field(
                 Noneable(Permissive(description="keyword arguments for DefaultAzureCredential")),
                 is_required=False,
