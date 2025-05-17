@@ -1,12 +1,15 @@
 import pytest
 import responses
+from dagster import Failure
 from dagster._config.field_utils import EnvVar
 from dagster._core.definitions.asset_spec import AssetSpec
+from dagster._core.errors import DagsterInvariantViolationError
 from dagster._core.test_utils import environ
 from dagster_fivetran import (
     DagsterFivetranTranslator,
     FivetranConnectorTableProps,
     FivetranWorkspace,
+    fivetran_assets,
     load_fivetran_asset_specs,
 )
 from dagster_fivetran.asset_defs import build_fivetran_assets_definitions
@@ -116,6 +119,30 @@ def test_broken_connector_fivetran_workspace_data(
     # The connector is discarded because it's broken
     assert len(actual_workspace_data.connectors_by_id) == 0
     assert len(actual_workspace_data.destinations_by_id) == 1
+
+
+def test_not_found_schema_config_fivetran_workspace_data(
+    not_found_schema_config_fetch_workspace_data_api_mocks: responses.RequestsMock,
+) -> None:
+    resource = FivetranWorkspace(
+        account_id=TEST_ACCOUNT_ID, api_key=TEST_API_KEY, api_secret=TEST_API_SECRET
+    )
+
+    actual_workspace_data = resource.get_or_fetch_workspace_data()
+    # The connector is discarded because it's broken
+    assert len(actual_workspace_data.connectors_by_id) == 0
+    assert len(actual_workspace_data.destinations_by_id) == 1
+
+
+def test_other_error_schema_config_fivetran_workspace_data(
+    other_error_schema_config_fetch_workspace_data_api_mocks: responses.RequestsMock,
+) -> None:
+    resource = FivetranWorkspace(
+        account_id=TEST_ACCOUNT_ID, api_key=TEST_API_KEY, api_secret=TEST_API_SECRET
+    )
+
+    with pytest.raises(Failure):
+        resource.get_or_fetch_workspace_data()
 
 
 def test_translator_spec(
@@ -241,7 +268,7 @@ def test_translator_custom_metadata(
         assert "dagster/kind/fivetran" in asset_spec.tags
 
 
-class MyAssetFactoryCustomTranslator(DagsterFivetranTranslator):
+class MyCustomTranslatorWithGroupName(DagsterFivetranTranslator):
     def get_asset_spec(self, data: FivetranConnectorTableProps) -> AssetSpec:  # pyright: ignore[reportIncompatibleMethodOverride]
         default_spec = super().get_asset_spec(data)
         return default_spec.replace_attributes(group_name="my_group_name")
@@ -258,9 +285,33 @@ def test_translator_custom_group_name_with_asset_factory(
         )
 
         my_fivetran_assets = build_fivetran_assets_definitions(
-            workspace=resource, dagster_fivetran_translator=MyAssetFactoryCustomTranslator()
+            workspace=resource, dagster_fivetran_translator=MyCustomTranslatorWithGroupName()
         )
 
         first_assets_def = next(assets_def for assets_def in my_fivetran_assets)
         first_asset_spec = next(asset_spec for asset_spec in first_assets_def.specs)
         assert first_asset_spec.group_name == "my_group_name"
+
+
+def test_translator_invariant_group_name_with_asset_decorator(
+    fetch_workspace_data_api_mocks: responses.RequestsMock,
+) -> None:
+    with environ({"FIVETRAN_API_KEY": TEST_API_KEY, "FIVETRAN_API_SECRET": TEST_API_SECRET}):
+        resource = FivetranWorkspace(
+            account_id=TEST_ACCOUNT_ID,
+            api_key=EnvVar("FIVETRAN_API_KEY"),
+            api_secret=EnvVar("FIVETRAN_API_SECRET"),
+        )
+
+        with pytest.raises(
+            DagsterInvariantViolationError,
+            match="Cannot set group_name parameter on fivetran_assets",
+        ):
+
+            @fivetran_assets(
+                connector_id=TEST_CONNECTOR_ID,
+                workspace=resource,
+                group_name="my_asset_decorator_group_name",
+                dagster_fivetran_translator=MyCustomTranslatorWithGroupName(),
+            )
+            def my_fivetran_assets(): ...

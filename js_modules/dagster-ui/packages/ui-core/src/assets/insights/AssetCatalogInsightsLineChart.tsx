@@ -1,4 +1,4 @@
-import {Box, Colors, Mono, Spinner, Subheading} from '@dagster-io/ui-components';
+import {BodySmall, Box, Colors, Mono, Spinner, Subheading} from '@dagster-io/ui-components';
 import {
   CategoryScale,
   ChartData,
@@ -9,19 +9,16 @@ import {
   PointElement,
   Tooltip,
 } from 'chart.js';
-import React, {useCallback, useMemo} from 'react';
+import React, {useCallback, useMemo, useRef} from 'react';
 import {Line} from 'react-chartjs-2';
 
 import styles from './AssetCatalogLineChart.module.css';
+import {AssetCatalogMetricNames} from './AssetCatalogMetricUtils';
+import {Context, useRenderChartTooltip} from './renderChartTooltip';
 import {useRGBColorsForTheme} from '../../app/useRGBColorsForTheme';
 import {TooltipCard} from '../../insights/InsightsChartShared';
-import {
-  RenderTooltipFn,
-  renderInsightsChartTooltip,
-} from '../../insights/renderInsightsChartTooltip';
-import {numberFormatter} from '../../ui/formatters';
+import {numberFormatter, percentFormatter} from '../../ui/formatters';
 import {useFormatDateTime} from '../../ui/useFormatDateTime';
-
 ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Tooltip);
 
 export type LineChartMetrics = {
@@ -87,62 +84,91 @@ const getDataset = (
 };
 
 export const AssetCatalogInsightsLineChart = React.memo(
-  ({metrics, loading}: {metrics: LineChartMetrics; loading: boolean}) => {
+  ({
+    metrics,
+    loading,
+    unitType,
+    openMetricDialog,
+    metricName,
+  }: {
+    metrics: LineChartMetrics;
+    loading: boolean;
+    unitType: string;
+    openMetricDialog: (data: {
+      after: number;
+      before: number;
+      metric: AssetCatalogMetricNames;
+      unit: string;
+    }) => void;
+    metricName: AssetCatalogMetricNames;
+  }) => {
     const formatDatetime = useFormatDateTime();
     const rgbColors = useRGBColorsForTheme();
 
-    const renderTooltipFn = useCallback(
-      ({dataPoints}: Parameters<RenderTooltipFn>[0], metrics: LineChartMetrics) => {
-        const currentPeriodDataPoint = dataPoints[0]!;
-        const prevPeriodDataPoint = dataPoints[1]!;
-        const date = formatDatetime(
-          new Date(metrics.timestamps[currentPeriodDataPoint.dataIndex]! * 1000),
-          {
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: 'numeric',
-          },
-        );
-        return (
-          <TooltipCard>
-            <Box flex={{direction: 'column', gap: 4}} padding={{vertical: 8, horizontal: 12}}>
-              <Box border="bottom" padding={{bottom: 4}} margin={{bottom: 4}}>
-                <Subheading>{date}</Subheading>
-              </Box>
-              <Box flex={{direction: 'row', justifyContent: 'space-between'}}>
-                <Box flex={{direction: 'row', alignItems: 'center', gap: 4}}>
-                  <div
-                    style={{
-                      width: 12,
-                      height: 12,
-                      backgroundColor: metrics.currentPeriod.color,
-                      border: `1px solid ${rgbColors[Colors.textDefault()]}`,
-                    }}
-                  />
-                  <div>Current Period:</div>
+    const renderTooltipFn = useRenderChartTooltip(
+      useCallback(
+        ({context}: {context: Context}) => {
+          const {tooltip} = context;
+          const currentPeriodDataPoint = tooltip.dataPoints[0]!;
+          const prevPeriodDataPoint = tooltip.dataPoints[1]!;
+          const date = formatDatetime(
+            new Date(metrics.timestamps[currentPeriodDataPoint.dataIndex]! * 1000),
+            {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: 'numeric',
+            },
+          );
+          const currentPeriodMetric = metrics.currentPeriod.data[currentPeriodDataPoint.dataIndex];
+          return (
+            <TooltipCard>
+              <Box flex={{direction: 'column', gap: 4}} padding={{vertical: 8, horizontal: 12}}>
+                <Box border="bottom" padding={{bottom: 4}} margin={{bottom: 4}}>
+                  <Subheading>{date}</Subheading>
                 </Box>
-                <Mono>{currentPeriodDataPoint?.formattedValue ?? 0}</Mono>
-              </Box>
-              <Box flex={{direction: 'row', justifyContent: 'space-between'}}>
-                <Box flex={{direction: 'row', alignItems: 'center', gap: 4}}>
-                  <div
-                    style={{
-                      width: 12,
-                      height: 12,
-                      backgroundColor: metrics.prevPeriod.color,
-                      border: `1px solid ${rgbColors[Colors.textDefault()]}`,
-                    }}
-                  />
-                  <div>Previous Period:</div>
+                <Box flex={{direction: 'row', justifyContent: 'space-between'}}>
+                  <Box flex={{direction: 'row', alignItems: 'center', gap: 4}}>
+                    <div
+                      style={{
+                        width: 12,
+                        height: 12,
+                        backgroundColor: metrics.currentPeriod.color,
+                        border: `1px solid ${rgbColors[Colors.textDefault()]}`,
+                      }}
+                    />
+                    <div>Current Period:</div>
+                  </Box>
+                  <Box flex={{direction: 'row', alignItems: 'center', gap: 4}}>
+                    <Mono>{currentPeriodDataPoint?.formattedValue ?? 0}</Mono>
+                    <BodySmall color={Colors.textLight()}>{unitType}</BodySmall>
+                  </Box>
                 </Box>
-                <Mono>{prevPeriodDataPoint?.formattedValue ?? 0}</Mono>
+                <Box flex={{direction: 'row', justifyContent: 'space-between'}}>
+                  <Box flex={{direction: 'row', alignItems: 'center', gap: 4}}>
+                    <div
+                      style={{
+                        width: 12,
+                        height: 12,
+                        backgroundColor: metrics.prevPeriod.color,
+                        border: `1px solid ${rgbColors[Colors.textDefault()]}`,
+                      }}
+                    />
+                    <div>Previous Period:</div>
+                  </Box>
+                  <Box flex={{direction: 'row', alignItems: 'center', gap: 4}}>
+                    <Mono>{prevPeriodDataPoint?.formattedValue ?? 0}</Mono>
+                    <BodySmall color={Colors.textLight()}>{unitType}</BodySmall>
+                  </Box>
+                </Box>
+                {currentPeriodMetric ? <BodySmall>Click for asset breakdown</BodySmall> : null}
               </Box>
-            </Box>
-          </TooltipCard>
-        );
-      },
-      [formatDatetime, rgbColors],
+            </TooltipCard>
+          );
+        },
+        [formatDatetime, metrics, rgbColors, unitType],
+      ),
+      useMemo(() => ({side: 'top', sideOffset: 50, align: 'start', alignOffset: 50}), []),
     );
 
     const options: ChartOptions<'line'> = useMemo(
@@ -152,11 +178,7 @@ export const AssetCatalogInsightsLineChart = React.memo(
           tooltip: {
             enabled: false,
             position: 'nearest',
-            external: (context) =>
-              renderInsightsChartTooltip({
-                ...context,
-                renderFn: (config) => renderTooltipFn(config, metrics),
-              }),
+            external: renderTooltipFn,
           },
         },
         interaction: {
@@ -166,7 +188,6 @@ export const AssetCatalogInsightsLineChart = React.memo(
         },
         scales: {
           x: {
-            grid: {display: false},
             ticks: {
               color: rgbColors[Colors.textLight()],
               maxRotation: 0,
@@ -176,14 +197,63 @@ export const AssetCatalogInsightsLineChart = React.memo(
             },
           },
           y: {
+            grid: {color: rgbColors[Colors.keylineDefault()]},
             beginAtZero: true,
           },
         },
         responsive: true,
         maintainAspectRatio: false,
       }),
-      [metrics, renderTooltipFn, rgbColors],
+      [renderTooltipFn, rgbColors],
     );
+
+    const chartRef = useRef(null);
+    const onClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!chartRef.current) {
+        return;
+      }
+
+      const chart = ChartJS.getChart(chartRef.current);
+      if (!chart) {
+        return;
+      }
+
+      const clickedElements = chart.getElementsAtEventForMode(
+        event.nativeEvent,
+        'y',
+        {axis: 'x', intersect: false},
+        false, // get elements in the clicked position even if animations are not completed
+      );
+      if (clickedElements.length > 0) {
+        const element = clickedElements[0];
+        if (element) {
+          const index = element.index;
+          let timeSliceSeconds = 60 * 60; // Default to 1 hour
+          if (metrics.timestamps.length >= 2) {
+            const timeSliceStart = metrics.timestamps[0];
+            const timeSliceEnd = metrics.timestamps[1];
+            if (timeSliceStart && timeSliceEnd) {
+              timeSliceSeconds = timeSliceEnd - timeSliceStart;
+            }
+          }
+
+          const after = metrics.timestamps[index]!;
+          const before = after + timeSliceSeconds;
+
+          // Only open the dialog if data exists for the clicked index
+          // in the current period
+          if (metrics.currentPeriod.data[index]) {
+            openMetricDialog({
+              after,
+              before,
+              metric: metricName,
+              unit: unitType,
+            });
+          }
+        }
+      }
+    };
+
     return (
       <div className={styles.chartContainer}>
         <div className={styles.chartHeader}>
@@ -197,14 +267,20 @@ export const AssetCatalogInsightsLineChart = React.memo(
             {metrics.currentPeriod.aggregateValue
               ? numberFormatter.format(Math.round(metrics.currentPeriod.aggregateValue))
               : 0}
+            <BodySmall color={Colors.textLight()}>{unitType}</BodySmall>
           </div>
           <div className={styles.chartChange}>
-            {numberFormatter.format(Math.round((metrics.pctChange ?? 0) * 100))}%
+            {percentFormatter.format(metrics.pctChange ?? 0)}
           </div>
         </Box>
         <div className={styles.chartWrapper}>
           <div className={styles.chartGraph}>
-            <Line data={getDataset(metrics, formatDatetime)} options={options} />
+            <Line
+              ref={chartRef}
+              data={getDataset(metrics, formatDatetime)}
+              options={options}
+              onClick={onClick}
+            />
           </div>
         </div>
       </div>
