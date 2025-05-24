@@ -42,7 +42,6 @@ from dagster_dg_tests.utils import (
     ConfigFileType,
     ProxyRunner,
     assert_runner_result,
-    dg_does_not_exit,
     dg_does_not_warn,
     dg_exits,
     dg_warns,
@@ -182,7 +181,9 @@ def test_context_with_user_config(monkeypatch, user_config_file: str):
 def test_context_with_root_layout():
     with (
         ProxyRunner.test() as runner,
-        isolated_example_project_foo_bar(runner, in_workspace=False, package_layout="root"),
+        isolated_example_project_foo_bar(
+            runner, uv_sync=True, in_workspace=False, package_layout="root"
+        ),
     ):
         context = DgContext.from_file_discovery_and_command_line_config(Path.cwd(), {})
         assert context.root_path == Path.cwd()
@@ -269,7 +270,7 @@ def test_missing_dg_plugin_module_in_manifest_warning():
     with (
         ProxyRunner.test() as runner,
         isolated_example_project_foo_bar(
-            runner, in_workspace=False, python_environment="active", skip_venv=True
+            runner, in_workspace=False, python_environment="active", uv_sync=False
         ),
     ):
         subprocess.check_output(["uv", "venv"])
@@ -290,7 +291,7 @@ def test_dagster_version(python_environment: DgProjectPythonEnvironmentFlag):
             runner,
             in_workspace=False,
             python_environment=python_environment,
-            skip_venv=False,
+            uv_sync=True,
         ),
     ):
         assert Path(".venv").exists()
@@ -367,30 +368,6 @@ def test_dg_up_to_date_warning(monkeypatch):
             DgContext.from_file_discovery_and_command_line_config(Path.cwd(), cli_config)
             out_str = out.getvalue()
             assert warning_str not in out_str
-
-
-def test_fail_on_dagster_dg_less_than_dagster(monkeypatch):
-    match_strs = ["Current `dg` version", "incompatible with `dagster` version"]
-
-    with (
-        ProxyRunner.test() as runner,
-        isolated_example_project_foo_bar(runner, python_environment="uv_managed"),
-    ):
-        context = DgContext.for_project_environment(Path.cwd(), {})
-
-        # Versions are the same, (0+dev) for the dev versions of packages, so no problem
-        with dg_does_not_exit(*match_strs):
-            context.external_components_command(["--help"])
-
-        # Now dagster-dg is greater than dagster, this is still OK
-        monkeypatch.setattr(dagster_dg.context, "__version__", "2!0+dev")
-        with dg_does_not_exit(*match_strs):
-            context.external_components_command(["--help"])
-
-        # Now dagster-dg is less than dagster, this should fail
-        monkeypatch.setattr(dagster_dg.context, "__version__", "0!0+dev")
-        with dg_exits(*match_strs):
-            context.external_components_command(["--help"])
 
 
 # ########################
@@ -566,7 +543,7 @@ def test_virtual_env_mismatch_warning():
             runner,
             in_workspace=False,
             python_environment="active",
-            skip_venv=False,
+            uv_sync=True,
         ),
     ):
         with dg_warns("virtual environment does not match"):

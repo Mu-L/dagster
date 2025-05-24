@@ -1,4 +1,5 @@
 {
+  "buildCommand": "echo 'Starting build...' && yarn build-api-docs && yarn build-kinds-tags && yarn build",
   "redirects": [
     {
       "source": "/dagster-cloud/:path*",
@@ -560,88 +561,96 @@
       "destination": "/dagster-plus/deployment/code-locations/"
     },
     {
+      "source": "/guides/migrate/:path*",
+      "destination": "/migration/:path*"
+    },
+    {
+      "source": "/dagster-plus/deployment/migration/serverless-to-hybrid",
+      "destination": "/migration/serverless-to-hybrid"
+    },
+    {
       "source": "/integrations/airflow/migrating-to-dagster",
-      "destination": "/guides/migrate/airflow-to-dagster/"
+      "destination": "/migration/airflow-to-dagster"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster/",
-      "destination": "/guides/migrate/airflow-to-dagster/"
+      "destination": "/migration/airflow-to-dagster"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster",
-      "destination": "/guides/migrate/airflow-to-dagster/"
+      "destination": "/migration/airflow-to-dagster/"
     },
     {
       "source": "/integrations/libraries/airlift/federation-tutorial/",
-      "destination": "/guides/migrate/airflow-to-dagster/federation/"
+      "destination": "/migration/airflow-to-dagster/federation/"
     },
     {
       "source": "/integrations/airlift/federation-tutorial/overview",
-      "destination": "/guides/migrate/airflow-to-dagster/federation/"
+      "destination": "/migration/airflow-to-dagster/federation/"
     },
     {
       "source": "/integrations/airlift/full_dag",
-      "destination": "/guides/migrate/airflow-to-dagster/dag-level-migration/"
+      "destination": "/migration/airflow-to-dagster/dag-level-migration/"
     },
     {
       "source": "/integrations/airlift/operator-migration/kubernetes-pod-operator",
-      "destination": "/guides/migrate/airflow-to-dagster/airflow-operator-migration/kubernetes-pod-operator"
+      "destination": "/migration/airflow-to-dagster/airflow-operator-migration/kubernetes-pod-operator"
     },
     {
       "source": "/integrations/airlift/operator-migration/bash-operator-general",
-      "destination": "/guides/migrate/airflow-to-dagster/airflow-operator-migration/bash-operator-general"
+      "destination": "/migration/airflow-to-dagster/airflow-operator-migration/bash-operator-general"
     },
     {
       "source": "/integrations/airlift/operator-migration/bash-operator-dbt",
-      "destination": "/guides/migrate/airflow-to-dagster/airflow-operator-migration/bash-operator-dbt"
+      "destination": "/migration/airflow-to-dagster/airflow-operator-migration/bash-operator-dbt"
     },
     {
       "source": "/integrations/airlift/operator-migration/python-operator",
-      "destination": "/guides/migrate/airflow-to-dagster/airflow-operator-migration/python-operator"
+      "destination": "/migration/airflow-to-dagster/airflow-operator-migration/python-operator"
     },
     {
       "source": "/integrations/airlift/reference",
-      "destination": "/guides/migrate/airflow-to-dagster/migration-reference"
+      "destination": "/migration/airflow-to-dagster/migration-reference"
     },
     {
       "source": "/integrations/libraries/airlift/federation-tutorial/observe",
-      "destination": "/guides/migrate/airflow-to-dagster/federation/observe"
+      "destination": "/migration/airflow-to-dagster/federation/observe"
     },
     {
       "source": "/integrations/airlift/tutorial",
-      "destination": "/guides/migrate/airflow-to-dagster/"
+      "destination": "/migration/airflow-to-dagster/"
     },
     {
       "source": "/integrations/airlift/tutorial/setup",
-      "destination": "/guides/migrate/airflow-to-dagster/task-level-migration/setup"
+      "destination": "/migration/airflow-to-dagster/task-level-migration/setup"
     },
     {
       "source": "/integrations/libraries/airlift/federation-tutorial/federated-execution",
-      "destination": "/guides/migrate/airflow-to-dagster/federation/federate-execution"
+      "destination": "/migration/airflow-to-dagster/federation/federate-execution"
     },
     {
       "source": "/integrations/libraries/airlift/operator-migration/",
-      "destination": "/guides/migrate/airflow-to-dagster/airflow-operator-migration/"
+      "destination": "/migration/airflow-to-dagster/airflow-operator-migration/"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster/peer",
-      "destination": "/guides/migrate/airflow-to-dagster/task-level-migration/peer"
+      "destination": "/migration/airflow-to-dagster/task-level-migration/peer"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster/observe",
-      "destination": "/guides/migrate/airflow-to-dagster/task-level-migration/observe"
+      "destination": "/migration/airflow-to-dagster/task-level-migration/observe"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster/migrate",
-      "destination": "/guides/migrate/airflow-to-dagster/task-level-migration/migrate"
+      "destination": "/migration/airflow-to-dagster/task-level-migration/migrate"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster/decomission",
-      "destination": "/guides/migrate/airflow-to-dagster/task-level-migration/decommission"
+      "destination": "/migration/airflow-to-dagster/task-level-migration/decommission"
     },
     {
       "source": "/integrations/libraries/airlift/airflow-to-dagster/migrate-a-full-dag",
-      "destination": "/guides/migrate/airflow-to-dagster/dag-level-migration/"
+      "destination": "/migration/airflow-to-dagster/dag-level-migration/"
     },
     {
       "source": "/integrations/airflow/reference",
@@ -649,7 +658,7 @@
     },
     {
       "source": "/integrations/airlift/airflow-dagster-equivalents",
-      "destination": "/guides/migrate/airflow-to-dagster/airflow-operator-migration/"
+      "destination": "/migration/airflow-to-dagster/airflow-operator-migration/"
     },
     {
       "source": "/deployment/open-source",
@@ -826,6 +835,10 @@
     {
       "source": "/concepts/automation/declarative-automation/customizing-automation-conditions",
       "destination": "/guides/automate/declarative-automation/customizing-automation-conditions"
+    },
+    {
+      "source": "/concepts/automation/declarative-automation/automation-condition-operands-and-operators",
+      "destination": "/guides/automate/declarative-automation/automation-condition-reference"
     },
     {
       "source": "/concepts/partitions-schedules-sensors/asset-sensors",
@@ -1531,25 +1544,20 @@
       "destination": "/guides/build/ops"
     },
     {
-      "source": "/migration",
-      "destination": "/guides/migrate/",
-      "permanent": false
-    },
-    {
       "source": "/guides/migrations",
-      "destination": "/guides/migrate/"
+      "destination": "/migration"
     },
     {
       "source": "/guides/migrations/migrating-airflow-to-dagster",
-      "destination": "/integrations/libraries/airlift/airflow-to-dagster"
+      "destination": "/migration/airflow-to-dagster"
     },
     {
       "source": "/integrations/airflow/from-airflow-to-dagster",
-      "destination": "/integrations/libraries/airlift/airflow-to-dagster/"
+      "destination": "/migration/airflow-to-dagster"
     },
     {
       "source": "/guides/migrations/observe-your-airflow-pipelines-with-dagster",
-      "destination": "/integrations/libraries/airlift/"
+      "destination": "/migration/airflow-to-dagster"
     },
     {
       "source": "/guides/dagster/recommended-project-structure",
@@ -1626,31 +1634,31 @@
     },
     {
       "source": "/integrations/dbt/quickstart",
-      "destination": "/integrations/libraries/dbt/transform-dbt"
+      "destination": "/integrations/libraries/dbt/quickstart"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster",
-      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster"
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster/set-up-dbt-project",
-      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster/set-up-dbt-project"
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster/set-up-dbt-project"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster/load-dbt-models",
-      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster/load-dbt-models"
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster/load-dbt-models"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster/upstream-assets",
-      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster/upstream-assets"
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster/upstream-assets"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster/downstream-assets",
-      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster/downstream-assets"
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster/downstream-assets"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster-plus",
-      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster-plus/"
+      "destination": "/integrations/libraries/dbt/using-dbt-with-dagster-plus"
     },
     {
       "source": "/integrations/dbt/using-dbt-with-dagster-plus/serverless",
@@ -1668,6 +1676,18 @@
       "source": "/integrations/dbt-cloud",
       "destination": "/integrations/libraries/dbt/dbt-cloud",
       "permanent": false
+    },
+    {
+      "source": "/integrations/libraries/dbt/using-dbt-with-dagster",
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster"
+    },
+    {
+      "source": "/integrations/libraries/dbt/using-dbt-with-dagster/:path*",
+      "destination": "/integrations/libraries/dbt/creating-a-dbt-project-in-dagster/:path*"
+    },
+    {
+      "source": "/integrations/libraries/dbt/transform-dbt",
+      "destination": "/integrations/libraries/dbt/quickstart"
     },
     {
       "source": "/integrations/deltalake",
@@ -1892,6 +1912,10 @@
     {
       "source": "/guides/labs/components/creating-a-component",
       "destination": "/guides/labs/components/creating-new-component-types/creating-and-registering-a-component-type"
+    },
+    {
+      "source": "/guides/labs/components/creating-new-component-types/customizing-components",
+      "destination": "/guides/labs/components/creating-new-component-types/subclassing-components"
     },
     {
       "source": "/guides/labs/components/existing-code-location",

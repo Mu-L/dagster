@@ -181,7 +181,8 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
                 "node_def is None, so keys_by_output_name must be empty",
             )
             check.invariant(
-                backfill_policy is None, "node_def is None, so backfill_policy must be None"
+                backfill_policy is None,
+                "node_def is None, so backfill_policy must be None",
             )
             check.invariant(not can_subset, "node_def is None, so can_subset must be False")
             self._computation = None
@@ -243,7 +244,8 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
 
         else:
             computation_not_none = check.not_none(
-                self._computation, "If specs are not provided, a node_def must be provided"
+                self._computation,
+                "If specs are not provided, a node_def must be provided",
             )
             all_asset_keys = set(computation_not_none.keys_by_output_name.values())
 
@@ -342,7 +344,16 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
 
         _validate_self_deps(normalized_specs)
 
-        self._specs_by_key = {spec.key: spec for spec in normalized_specs}
+        self._specs_by_key = {}
+        for spec in normalized_specs:
+            if spec.key in self._specs_by_key and self._specs_by_key[spec.key] != spec:
+                warnings.warn(
+                    "Received conflicting AssetSpecs with the same key:\n"
+                    f"{self._specs_by_key[spec.key]}\n"
+                    f"{spec}\n"
+                    "This warning will become an exception in version 1.11"
+                )
+            self._specs_by_key[spec.key] = spec
 
         self._partition_mappings = get_partition_mappings_from_deps(
             {},
@@ -653,7 +664,10 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
         keys_by_input_name = _infer_keys_by_input_names(
             node_def,
             check.opt_mapping_param(
-                keys_by_input_name, "keys_by_input_name", key_type=str, value_type=AssetKey
+                keys_by_input_name,
+                "keys_by_input_name",
+                key_type=str,
+                value_type=AssetKey,
             ),
         )
         keys_by_output_name = check.opt_mapping_param(
@@ -973,7 +987,9 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
         }
 
     @property
-    def auto_materialize_policies_by_key(self) -> Mapping[AssetKey, AutoMaterializePolicy]:
+    def auto_materialize_policies_by_key(
+        self,
+    ) -> Mapping[AssetKey, AutoMaterializePolicy]:
         return {
             key: spec.auto_materialize_policy
             for key, spec in self._specs_by_key.items()
@@ -1395,7 +1411,8 @@ class AssetsDefinition(ResourceAddable, IHasInternalInit):
         if key is not None:
             resolved_key = AssetKey.from_coercible(key)
             check.invariant(
-                resolved_key in self.keys, f"Key {resolved_key} not found in AssetsDefinition"
+                resolved_key in self.keys,
+                f"Key {resolved_key} not found in AssetsDefinition",
             )
         else:
             resolved_key = self.key
@@ -1831,7 +1848,8 @@ def _validate_self_deps(specs: Iterable[AssetSpec]) -> None:
 
 
 def get_self_dep_time_window_partition_mapping(
-    partition_mapping: Optional[PartitionMapping], partitions_def: Optional[PartitionsDefinition]
+    partition_mapping: Optional[PartitionMapping],
+    partitions_def: Optional[PartitionsDefinition],
 ) -> Optional[TimeWindowPartitionMapping]:
     """Returns a time window partition mapping dimension of the provided partition mapping,
     if exists.
@@ -1856,7 +1874,9 @@ def get_self_dep_time_window_partition_mapping(
 
 
 def get_partition_mappings_from_deps(
-    partition_mappings: dict[AssetKey, PartitionMapping], deps: Iterable[AssetDep], asset_name: str
+    partition_mappings: dict[AssetKey, PartitionMapping],
+    deps: Iterable[AssetDep],
+    asset_name: str,
 ) -> Mapping[AssetKey, PartitionMapping]:
     # Add PartitionMappings specified via AssetDeps to partition_mappings dictionary. Error on duplicates
     for dep in deps:

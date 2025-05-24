@@ -30,6 +30,7 @@ from dagster.components.component.component import Component
 from dagster.components.component.component_loader import is_component_loader
 from dagster.components.core.context import ComponentLoadContext, use_component_load_context
 from dagster.components.core.package_entry import load_package_object
+from dagster.components.definitions import LazyDefinitions
 from dagster.components.resolved.base import Resolvable
 from dagster.components.resolved.core_models import AssetPostProcessor
 
@@ -50,7 +51,7 @@ class ComponentFileModel(BaseModel):
     requirements: Optional[ComponentRequirementsModel] = None
 
 
-def _add_component_yaml_code_reference_to_spec(
+def _add_defs_yaml_code_reference_to_spec(
     component_yaml_path: Path,
     load_context: ComponentLoadContext,
     component: Component,
@@ -88,12 +89,12 @@ class CompositeYamlComponent(Component):
         self.source_positions = source_positions
 
     def build_defs(self, context: ComponentLoadContext) -> Definitions:
-        component_yaml = context.path / "component.yaml"
+        component_yaml = check.not_none(_find_defs_or_component_yaml(context.path))
 
         return Definitions.merge(
             *(
                 component.build_defs(context).map_asset_specs(
-                    func=lambda spec: _add_component_yaml_code_reference_to_spec(
+                    func=lambda spec: _add_defs_yaml_code_reference_to_spec(
                         component_yaml_path=component_yaml,
                         load_context=context,
                         component=component,
@@ -113,7 +114,7 @@ def get_component(context: ComponentLoadContext) -> Optional[Component]:
     """
     # in priority order
     # yaml component
-    if (context.path / "component.yaml").exists():
+    if _find_defs_or_component_yaml(context.path):
         return load_yaml_component(context)
     # pythonic component
     elif (context.path / "component.py").exists():
@@ -125,7 +126,7 @@ def get_component(context: ComponentLoadContext) -> Optional[Component]:
         return DagsterDefsComponent(path=context.path)
     # folder
     elif context.path.is_dir():
-        children = _crawl(context)
+        children = find_components_from_context(context)
         if children:
             return DefsFolderComponent(
                 path=context.path,
@@ -172,7 +173,7 @@ class DefsFolderComponent(Component):
 
         return DefsFolderComponent(
             path=context.path,
-            children=_crawl(context),
+            children=find_components_from_context(context),
             asset_post_processors=resolved_attributes.asset_post_processors,
         )
 
@@ -210,7 +211,7 @@ EXPLICITLY_IGNORED_GLOB_PATTERNS = [
 ]
 
 
-def _crawl(context: ComponentLoadContext) -> Mapping[Path, Component]:
+def find_components_from_context(context: ComponentLoadContext) -> Mapping[Path, Component]:
     found = {}
     for subpath in context.path.iterdir():
         relative_subpath = subpath.relative_to(context.path)
@@ -234,20 +235,46 @@ class DagsterDefsComponent(Component):
 
     def build_defs(self, context: ComponentLoadContext) -> Definitions:
         module = context.load_defs_relative_python_module(self.path)
-        definitions_objects = list(find_objects_in_module_of_types(module, Definitions))
-        if len(definitions_objects) == 0:
-            return load_definitions_from_module(module)
-        elif len(definitions_objects) == 1:
-            return next(iter(definitions_objects))
-        else:
+
+        def_objects = check.is_list(
+            list(find_objects_in_module_of_types(module, Definitions)), Definitions
+        )
+        lazy_def_objects = check.is_list(
+            list(find_objects_in_module_of_types(module, LazyDefinitions)), LazyDefinitions
+        )
+
+        if lazy_def_objects and def_objects:
+            raise DagsterInvalidDefinitionError(
+                f"Found both @definitions-decorated functions and Definitions objects in {self.path}. "
+                "At most one may be specified per module."
+            )
+
+        if len(def_objects) == 1:
+            return next(iter(def_objects))
+
+        if len(def_objects) > 1:
             raise DagsterInvalidDefinitionError(
                 f"Found multiple Definitions objects in {self.path}. At most one Definitions object "
                 "may be specified per module."
             )
 
+        if len(lazy_def_objects) == 1:
+            lazy_def = next(iter(lazy_def_objects))
+            return lazy_def(context)
+
+        if len(lazy_def_objects) > 1:
+            raise DagsterInvalidDefinitionError(
+                f"Found multiple @definitions-decorated functions in {self.path}. At most one "
+                "@definitions-decorated function may be specified per module."
+            )
+
+        return load_definitions_from_module(module)
+
 
 def load_pythonic_component(context: ComponentLoadContext) -> Component:
-    module = context.load_defs_relative_python_module(context.path / "component.py")
+    # backcompat for component.yaml
+    component_def_path = context.path / "component.py"
+    module = context.load_defs_relative_python_module(component_def_path)
     component_loaders = list(inspect.getmembers(module, is_component_loader))
     if len(component_loaders) == 0:
         raise DagsterInvalidDefinitionError("No component loaders found in module")
@@ -262,7 +289,7 @@ def load_pythonic_component(context: ComponentLoadContext) -> Component:
 
 def load_yaml_component(context: ComponentLoadContext) -> Component:
     # parse the yaml file
-    component_def_path = context.path / "component.yaml"
+    component_def_path = check.not_none(_find_defs_or_component_yaml(context.path))
     source_trees = parse_yamls_with_source_position(
         component_def_path.read_text(), str(component_def_path)
     )
@@ -305,4 +332,13 @@ def load_yaml_component(context: ComponentLoadContext) -> Component:
     check.invariant(len(components) > 0, "No components found in YAML file")
     return CompositeYamlComponent(
         components, [source_tree.source_position_tree.position for source_tree in source_trees]
+    )
+
+
+# When we remove component.yaml, we can remove this function for just a defs.yaml check
+def _find_defs_or_component_yaml(path: Path) -> Optional[Path]:
+    # Check for defs.yaml has precedence, component.yaml is deprecated
+    return next(
+        (p for p in (path / "defs.yaml", path / "component.yaml") if p.exists()),
+        None,
     )

@@ -12,7 +12,6 @@ import uuid
 import warnings
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack
-from enum import Enum
 from functools import update_wrapper
 from threading import Event as ThreadingEventType
 from time import sleep
@@ -63,6 +62,7 @@ from dagster._grpc.__generated__.dagster_api_pb2_grpc import (
     DagsterApiServicer,
     add_DagsterApiServicer_to_server,
 )
+from dagster._grpc.constants import GrpcServerCommand
 from dagster._grpc.impl import (
     IPCErrorMessage,
     RunInSubprocessComplete,
@@ -112,6 +112,7 @@ from dagster._utils.container import (
 )
 from dagster._utils.env import use_verbose, using_dagster_dev
 from dagster._utils.error import serializable_error_info_from_exc_info, unwrap_user_code_error
+from dagster._utils.path import is_likely_venv_executable
 from dagster._utils.typed_dict import init_optional_typeddict
 
 if TYPE_CHECKING:
@@ -497,6 +498,9 @@ class DagsterApiServer(DagsterApiServicer):
                 break
 
             if self.__last_heartbeat_time < time.time() - heartbeat_timeout:
+                self._logger.warning(
+                    f"No heartbeat received in {heartbeat_timeout} seconds, shutting down"
+                )
                 self._shutdown_once_executions_finish_event.set()
 
     def _cleanup_thread(self) -> None:
@@ -1352,14 +1356,6 @@ class CouldNotStartServerProcess(Exception):
         )
 
 
-INCREASE_TIMEOUT_DAGSTER_YAML_MSG = """To increase the timeout, add the following to a dagster.yaml file, located in your $DAGSTER_HOME folder or the folder where you are running `dagster dev`:
-
-code_servers:
-  local_startup_timeout: <timeout value>
-
-"""
-
-
 def wait_for_grpc_server(
     server_process: subprocess.Popen,
     client: "DagsterGrpcClient",
@@ -1393,19 +1389,6 @@ def wait_for_grpc_server(
         sleep(0.1)
 
 
-class GrpcServerCommand(Enum):
-    API_GRPC = "api_grpc"
-    CODE_SERVER_START = "code_server_start"
-
-    @property
-    def server_command(self) -> Sequence[str]:
-        return (
-            ["api", "grpc", "--lazy-load-user-code"]
-            if self == GrpcServerCommand.API_GRPC
-            else ["code-server", "start"]
-        )
-
-
 def open_server_process(
     instance_ref: Optional[InstanceRef],
     port: Optional[int],
@@ -1420,7 +1403,6 @@ def open_server_process(
     startup_timeout: int = 20,
     cwd: Optional[str] = None,
     log_level: str = "INFO",
-    env: Optional[dict[str, str]] = None,
     inject_env_vars_from_instance: bool = True,
     container_image: Optional[str] = None,
     container_context: Optional[dict[str, Any]] = None,
@@ -1458,8 +1440,20 @@ def open_server_process(
         subprocess_args += loadable_target_origin.get_cli_args()
 
     env = {
-        **(env or os.environ),
+        **os.environ,
     }
+
+    if (
+        executable_path
+        and is_likely_venv_executable(executable_path)
+        and executable_path != sys.executable
+    ):
+        # ensure that if a venv is being used as an executable path that the same PATH
+        # that would be set if the venv was activated is also set in the launched
+        # subprocess
+        current_path = os.environ.get("PATH")
+        added_path = os.path.dirname(executable_path)
+        env["PATH"] = f"{added_path}{os.pathsep}{current_path}" if current_path else added_path
 
     # Unset click environment variables in the current environment
     # that might conflict with arguments that we're using
@@ -1533,7 +1527,6 @@ class GrpcServerProcess:
         startup_timeout: int = 20,
         cwd: Optional[str] = None,
         log_level: str = "INFO",
-        env: Optional[dict[str, str]] = None,
         wait_on_exit=False,
         inject_env_vars_from_instance: bool = True,
         container_image: Optional[str] = None,
@@ -1575,7 +1568,6 @@ class GrpcServerProcess:
         self._startup_timeout = startup_timeout
         self._cwd = cwd
         self._log_level = log_level
-        self._env = env
         self._inject_env_vars_from_instance = inject_env_vars_from_instance
         self._container_image = container_image
         self._container_context = container_context
@@ -1597,7 +1589,6 @@ class GrpcServerProcess:
             startup_timeout=self._startup_timeout,
             cwd=self._cwd,
             log_level=self._log_level,
-            env=self._env,
             inject_env_vars_from_instance=self._inject_env_vars_from_instance,
             container_image=self._container_image,
             container_context=self._container_context,

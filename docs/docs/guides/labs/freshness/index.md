@@ -1,8 +1,10 @@
 ---
 title: 'Freshness policies'
+description: Dagster Freshness policies help you understand which of your assets have materialized recently and which ones are running behind - a key component of asset health.
 sidebar_position: 100
 unlisted: True
 ---
+
 import FreshnessPoliciesPreview from '@site/docs/partials/\_FreshnessPoliciesPreview.md';
 
 <FreshnessPoliciesPreview />
@@ -35,7 +37,12 @@ For example, the policy below states that there should be a successful materiali
 
 <CodeExample path="docs_snippets/docs_snippets/guides/freshness/time_window_policy.py" language="python" />
 
+:::info
 
+- `fail_window` and `warn_window` cannot be shorter than 60 seconds.
+- `warn_window` must be less than `fail_window`.
+
+:::
 
 ## Setting freshness policies
 
@@ -68,7 +75,7 @@ Freshness policies are not currently supported for source observable assets (<Py
 ## Future enhancements
 
 - More freshness policy types, including:
-    - Cron-based
-    - Anomaly detection-based
-    - Custom (user-defined) freshness
+  - Cron-based
+  - Anomaly detection-based
+  - Custom (user-defined) freshness
 - Support for source observable assets

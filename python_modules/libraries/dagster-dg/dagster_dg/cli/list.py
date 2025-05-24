@@ -1,34 +1,44 @@
 import json
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import click
-from dagster_shared.ipc import ipc_tempfile
+from dagster_shared.plus.config import DagsterPlusCliConfig
 from dagster_shared.record import as_dict
 from dagster_shared.serdes import deserialize_value
 from dagster_shared.serdes.errors import DeserializationError
-from dagster_shared.serdes.objects import PluginObjectSnap
 from dagster_shared.serdes.objects.definition_metadata import (
     DgAssetCheckMetadata,
     DgAssetMetadata,
     DgDefinitionMetadata,
     DgJobMetadata,
+    DgResourceMetadata,
     DgScheduleMetadata,
     DgSensorMetadata,
 )
 from packaging.version import Version
 from rich.console import Console
-from rich.table import Table
-from rich.text import Text
 
 from dagster_dg.cli.shared_options import dg_global_options, dg_path_options
-from dagster_dg.component import PluginObjectFeature, RemotePluginRegistry
+from dagster_dg.component import RemotePluginRegistry
 from dagster_dg.config import normalize_cli_config
 from dagster_dg.context import DgContext
 from dagster_dg.env import ProjectEnvVars, get_project_specified_env_vars
-from dagster_dg.utils import DgClickCommand, DgClickGroup
+from dagster_dg.utils import (
+    DgClickCommand,
+    DgClickGroup,
+    capture_stdout,
+    validate_dagster_availability,
+)
+from dagster_dg.utils.plus import gql
+from dagster_dg.utils.plus.gql_client import DagsterPlusGraphQLClient
 from dagster_dg.utils.telemetry import cli_telemetry_wrapper
+
+if TYPE_CHECKING:
+    from rich.table import Table
 
 
 @click.group(name="list", cls=DgClickGroup)
@@ -41,7 +51,9 @@ def list_group():
 # ########################
 
 
-def DagsterInnerTable(columns: Sequence[str]) -> Table:
+def DagsterInnerTable(columns: Sequence[str]) -> "Table":
+    from rich.table import Table
+
     table = Table(border_style="dim", show_lines=True)
     table.add_column(columns[0], style="bold cyan", no_wrap=True)
     for column in columns[1:]:
@@ -49,7 +61,9 @@ def DagsterInnerTable(columns: Sequence[str]) -> Table:
     return table
 
 
-def DagsterOuterTable(columns: Sequence[str]) -> Table:
+def DagsterOuterTable(columns: Sequence[str]) -> "Table":
+    from rich.table import Table
+
     table = Table(border_style="dim")
     for column in columns:
         table.add_column(column, style="bold")
@@ -80,77 +94,10 @@ def list_project_command(path: Path, **global_options: object) -> None:
 
 
 @list_group.command(name="components", aliases=["component"], cls=DgClickCommand)
-@dg_path_options
-@dg_global_options
-@cli_telemetry_wrapper
-def list_component_command(path: Path, **global_options: object) -> None:
-    """List Dagster component instances defined in the current project."""
-    cli_config = normalize_cli_config(global_options, click.get_current_context())
-    dg_context = DgContext.for_project_environment(path, cli_config)
-
-    for component_instance_name in dg_context.get_component_instance_names():
-        click.echo(component_instance_name)
-
-
-# ########################
-# ##### PLUGINS
-# ########################
-
-
-FEATURE_COLOR_MAP = {"component": "deep_sky_blue3", "scaffold-target": "khaki1"}
-
-
-def _pretty_features(obj: PluginObjectSnap) -> Text:
-    text = Text()
-    for entry_type in obj.features:
-        if len(text) > 0:
-            text += Text(", ")
-        text += Text(entry_type, style=FEATURE_COLOR_MAP.get(entry_type, ""))
-    text = Text("[") + text + Text("]")
-    return text
-
-
-def _plugin_object_table(entries: Sequence[PluginObjectSnap]) -> Table:
-    sorted_entries = sorted(entries, key=lambda x: x.key.to_typename())
-    table = DagsterInnerTable(["Symbol", "Summary", "Features"])
-    for entry in sorted_entries:
-        table.add_row(entry.key.to_typename(), entry.summary, _pretty_features(entry))
-    return table
-
-
-def _all_plugins_object_table(
-    registry: RemotePluginRegistry, name_only: bool, feature: Optional[PluginObjectFeature]
-) -> Table:
-    table = DagsterOuterTable(["Plugin"] if name_only else ["Plugin", "Objects"])
-
-    for package in sorted(registry.packages):
-        if not name_only:
-            objs = registry.get_objects(package, feature)
-            if objs:  # only add the row if there are objects
-                inner_table = _plugin_object_table(objs)
-                table.add_row(package, inner_table)
-        else:
-            table.add_row(package)
-    return table
-
-
-@list_group.command(name="plugins", aliases=["plugin"], cls=DgClickCommand)
 @click.option(
-    "--name-only",
-    is_flag=True,
-    default=False,
-    help="Only display the names of the plugin packages.",
-)
-@click.option(
-    "--plugin",
+    "--package",
     "-p",
-    help="Filter by plugin name.",
-)
-@click.option(
-    "--feature",
-    "-f",
-    type=click.Choice(["component", "scaffold-target"]),
-    help="Filter by object type.",
+    help="Filter by package name.",
 )
 @click.option(
     "--json",
@@ -162,36 +109,77 @@ def _all_plugins_object_table(
 @dg_path_options
 @dg_global_options
 @cli_telemetry_wrapper
-def list_plugins_command(
-    name_only: bool,
-    plugin: Optional[str],
-    feature: Optional[PluginObjectFeature],
+def list_components_command(
+    path: Path, package: Optional[str], output_json: bool, **global_options: object
+) -> None:
+    """List all available Dagster component types in the current Python environment."""
+    cli_config = normalize_cli_config(global_options, click.get_current_context())
+    dg_context = DgContext.for_defined_registry_environment(path, cli_config)
+    registry = RemotePluginRegistry.from_dg_context(dg_context)
+
+    # Get all components (objects that have the 'component' feature)
+    component_objects = sorted(
+        registry.get_objects(feature="component"), key=lambda x: x.key.to_typename()
+    )
+    if package:
+        # Filter by package name. Can accept a dot-separated module name for finer granularity.
+        component_objects = [
+            obj
+            for obj in component_objects
+            if obj.key.namespace == package or obj.key.namespace.startswith(f"{package}.")
+        ]
+
+    if output_json:
+        output = [
+            {"key": obj.key.to_typename(), "summary": obj.summary} for obj in component_objects
+        ]
+        click.echo(json.dumps(output))
+    else:
+        # Create a table with component types
+        table = DagsterInnerTable(["Key", "Summary"])
+        for component in sorted(component_objects, key=lambda x: x.key.to_typename()):
+            table.add_row(component.key.to_typename(), component.summary)
+        Console().print(table)
+
+
+# ########################
+# ##### PLUGINS
+# ########################
+
+
+FEATURE_COLOR_MAP = {"component": "deep_sky_blue3", "scaffold-target": "khaki1"}
+
+
+@list_group.command(name="plugin-modules", aliases=["plugin-module"], cls=DgClickCommand)
+@click.option(
+    "--json",
+    "output_json",
+    is_flag=True,
+    default=False,
+    help="Output as JSON instead of a table.",
+)
+@dg_path_options
+@dg_global_options
+@cli_telemetry_wrapper
+def list_plugin_modules_command(
     output_json: bool,
     path: Path,
     **global_options: object,
 ) -> None:
     """List dg plugins and their corresponding objects in the current Python environment."""
+    from rich.console import Console
+
     cli_config = normalize_cli_config(global_options, click.get_current_context())
     dg_context = DgContext.for_defined_registry_environment(path, cli_config)
     registry = RemotePluginRegistry.from_dg_context(dg_context)
-    # pp(registry.get_objects())
 
     if output_json:
-        output: list[dict[str, object]] = []
-        for entry in sorted(registry.get_objects(), key=lambda x: x.key.to_typename()):
-            output.append(
-                {
-                    "key": entry.key.to_typename(),
-                    "summary": entry.summary,
-                    "features": entry.features,
-                }
-            )
-        click.echo(json.dumps(output, indent=4))
-    else:  # table output
-        if plugin:
-            table = _plugin_object_table(registry.get_objects(plugin, feature))
-        else:
-            table = _all_plugins_object_table(registry, name_only, feature=feature)
+        json_output = [{"module": module} for module in sorted(registry.modules)]
+        click.echo(json.dumps(json_output))
+    else:
+        table = DagsterOuterTable(["Module"])
+        for module in sorted(registry.modules):
+            table.add_row(module)
         Console().print(table)
 
 
@@ -200,7 +188,9 @@ def list_plugins_command(
 # ########################
 
 
-def _get_assets_table(assets: Sequence[DgAssetMetadata]) -> Table:
+def _get_assets_table(assets: Sequence[DgAssetMetadata]) -> "Table":
+    from rich.text import Text
+
     table = DagsterInnerTable(["Key", "Group", "Deps", "Kinds", "Description"])
     table.columns[-1].max_width = 100
 
@@ -217,7 +207,9 @@ def _get_assets_table(assets: Sequence[DgAssetMetadata]) -> Table:
     return table
 
 
-def _get_asset_checks_table(asset_checks: Sequence[DgAssetCheckMetadata]) -> Table:
+def _get_asset_checks_table(asset_checks: Sequence[DgAssetCheckMetadata]) -> "Table":
+    from rich.text import Text
+
     table = DagsterInnerTable(["Key", "Additional Deps", "Description"])
     table.columns[-1].max_width = 100
 
@@ -232,7 +224,7 @@ def _get_asset_checks_table(asset_checks: Sequence[DgAssetCheckMetadata]) -> Tab
     return table
 
 
-def _get_jobs_table(jobs: Sequence[DgJobMetadata]) -> Table:
+def _get_jobs_table(jobs: Sequence[DgJobMetadata]) -> "Table":
     table = DagsterInnerTable(["Name"])
 
     for job in sorted(jobs, key=lambda x: x.name):
@@ -240,7 +232,15 @@ def _get_jobs_table(jobs: Sequence[DgJobMetadata]) -> Table:
     return table
 
 
-def _get_schedules_table(schedules: Sequence[DgScheduleMetadata]) -> Table:
+def _get_resources_table(resources: Sequence[DgResourceMetadata]) -> "Table":
+    table = DagsterInnerTable(["Name", "Type"])
+
+    for resource in sorted(resources, key=lambda x: x.name):
+        table.add_row(resource.name, resource.type)
+    return table
+
+
+def _get_schedules_table(schedules: Sequence[DgScheduleMetadata]) -> "Table":
     table = DagsterInnerTable(["Name", "Cron schedule"])
 
     for schedule in sorted(schedules, key=lambda x: x.name):
@@ -248,7 +248,7 @@ def _get_schedules_table(schedules: Sequence[DgScheduleMetadata]) -> Table:
     return table
 
 
-def _get_sensors_table(sensors: Sequence[DgSensorMetadata]) -> Table:
+def _get_sensors_table(sensors: Sequence[DgSensorMetadata]) -> "Table":
     table = DagsterInnerTable(["Name"])
 
     for sensor in sorted(sensors, key=lambda x: x.name):
@@ -293,50 +293,22 @@ MIN_DAGSTER_COMPONENTS_LIST_DEFINITIONS_OUTPUT_FILE_OPTION_VERSION = Version("1.
 @cli_telemetry_wrapper
 def list_defs_command(output_json: bool, path: Path, **global_options: object) -> None:
     """List registered Dagster definitions in the current project environment."""
+    from rich.console import Console
+    from rich.table import Table
+
     cli_config = normalize_cli_config(global_options, click.get_current_context())
     dg_context = DgContext.for_project_environment(path, cli_config)
 
-    # On newer versions, we use a dedicated channel in the form of a tempfile that will _only_ have
-    # the expected output written to it.
-    if (
-        dg_context.dagster_version
-        >= MIN_DAGSTER_COMPONENTS_LIST_DEFINITIONS_OUTPUT_FILE_OPTION_VERSION
-    ):
-        with ipc_tempfile() as temp_file:
-            dg_context.external_components_command(
-                [
-                    "list",
-                    "definitions",
-                    "--location",
-                    dg_context.code_location_name,
-                    "--module-name",
-                    dg_context.code_location_target_module_name,
-                    "--output-file",
-                    temp_file,
-                ],
-            )
-            definitions = deserialize_value(
-                Path(temp_file).read_text(), as_type=list[DgDefinitionMetadata]
-            )
+    validate_dagster_availability()
 
-    # On older versions, we extract the output from the raw stdout of the command.
-    else:
-        location_opts = (
-            ["--location", dg_context.code_location_name]
-            if dg_context.dagster_version
-            >= MIN_DAGSTER_COMPONENTS_LIST_DEFINITIONS_LOCATION_OPTION_VERSION
-            else []
+    from dagster.components.cli.list import list_definitions_impl
+
+    # capture stdout during the definitions load so it doesn't pollute the structured output
+    with capture_stdout():
+        definitions = list_definitions_impl(
+            location=dg_context.code_location_name,
+            module_name=dg_context.code_location_target_module_name,
         )
-        output = dg_context.external_components_command(
-            [
-                "list",
-                "definitions",
-                "--module-name",
-                dg_context.code_location_target_module_name,
-                *location_opts,
-            ],
-        )
-        definitions = _extract_list_defs_output_from_raw_output(output)
 
     # JSON
     if output_json:  # pass it straight through
@@ -348,6 +320,7 @@ def list_defs_command(output_json: bool, path: Path, **global_options: object) -
         assets = [item for item in definitions if isinstance(item, DgAssetMetadata)]
         asset_checks = [item for item in definitions if isinstance(item, DgAssetCheckMetadata)]
         jobs = [item for item in definitions if isinstance(item, DgJobMetadata)]
+        resources = [item for item in definitions if isinstance(item, DgResourceMetadata)]
         schedules = [item for item in definitions if isinstance(item, DgScheduleMetadata)]
         sensors = [item for item in definitions if isinstance(item, DgSensorMetadata)]
 
@@ -371,6 +344,8 @@ def list_defs_command(output_json: bool, path: Path, **global_options: object) -
             table.add_row("Schedules", _get_schedules_table(schedules))
         if sensors:
             table.add_row("Sensors", _get_sensors_table(sensors))
+        if resources:
+            table.add_row("Resources", _get_resources_table(resources))
 
         console.print(table)
 
@@ -380,12 +355,58 @@ def list_defs_command(output_json: bool, path: Path, **global_options: object) -
 # ########################
 
 
+@dataclass
+class DagsterPlusScopesForVariable:
+    has_full_value: bool
+    has_branch_value: bool
+    has_local_value: bool
+
+
+def _get_dagster_plus_keys(
+    location_name: str, env_var_keys: set[str]
+) -> Optional[Mapping[str, DagsterPlusScopesForVariable]]:
+    """Retrieves the set Dagster Plus keys for the given location name, if Plus is configured, otherwise returns None."""
+    if not DagsterPlusCliConfig.exists():
+        return None
+    config = DagsterPlusCliConfig.get()
+    if not config.organization:
+        return None
+
+    scopes_for_key = defaultdict(lambda: DagsterPlusScopesForVariable(False, False, False))
+    gql_client = DagsterPlusGraphQLClient.from_config(config)
+
+    secrets_by_location = gql_client.execute(
+        gql.GET_SECRETS_FOR_SCOPES_QUERY_NO_VALUE,
+        {
+            "locationName": location_name,
+            "scopes": {
+                "fullDeploymentScope": True,
+                "allBranchDeploymentsScope": True,
+                "localDeploymentScope": True,
+            },
+        },
+    )["secretsOrError"]["secrets"]
+
+    for secret in secrets_by_location:
+        key = secret["secretName"]
+        if key in env_var_keys:
+            if secret["fullDeploymentScope"]:
+                scopes_for_key[key].has_full_value = True
+            if secret["allBranchDeploymentsScope"]:
+                scopes_for_key[key].has_branch_value = True
+            if secret["localDeploymentScope"]:
+                scopes_for_key[key].has_local_value = True
+    return scopes_for_key
+
+
 @list_group.command(name="envs", aliases=["env"], cls=DgClickCommand)
 @dg_path_options
 @dg_global_options
 @cli_telemetry_wrapper
 def list_env_command(path: Path, **global_options: object) -> None:
     """List environment variables from the .env file of the current project."""
+    from rich.console import Console
+
     cli_config = normalize_cli_config(global_options, click.get_current_context())
     dg_context = DgContext.for_project_environment(path, cli_config)
 
@@ -396,14 +417,34 @@ def list_env_command(path: Path, **global_options: object) -> None:
         click.echo("No environment variables are defined for this project.")
         return
 
-    table = Table(border_style="dim")
+    env_var_keys = env.values.keys() | used_env_vars.keys()
+    plus_keys = _get_dagster_plus_keys(dg_context.project_name, env_var_keys)
+
+    table = DagsterOuterTable([])
     table.add_column("Env Var")
     table.add_column("Value")
     table.add_column("Components")
-    env_var_keys = env.values.keys() | used_env_vars.keys()
+    if plus_keys is not None:
+        table.add_column("Dev")
+        table.add_column("Branch")
+        table.add_column("Full")
+
     for key in sorted(env_var_keys):
         components = used_env_vars.get(key, [])
-        table.add_row(key, env.values.get(key), ", ".join(str(path) for path in components))
+        table.add_row(
+            key,
+            "✓" if key in env.values else "",
+            ", ".join(str(path) for path in components),
+            *(
+                [
+                    "✓" if plus_keys[key].has_local_value else "",
+                    "✓" if plus_keys[key].has_branch_value else "",
+                    "✓" if plus_keys[key].has_full_value else "",
+                ]
+                if plus_keys is not None
+                else []
+            ),
+        )
 
     console = Console()
     console.print(table)

@@ -2,6 +2,7 @@ import React, {useCallback, useMemo, useState} from 'react';
 import {useHistory} from 'react-router';
 import {useFavoriteAssets} from 'shared/assets/useFavoriteAssets.oss';
 
+import {useFullScreen, useFullScreenAllowedView} from '../../app/AppTopNav/AppTopNavContext';
 import {AssetGraphExplorer} from '../../asset-graph/AssetGraphExplorer';
 import {AssetGraphViewType, tokenForAssetKey} from '../../asset-graph/Utils';
 import {AssetLocation} from '../../asset-graph/useFindAssetLocation';
@@ -15,14 +16,16 @@ export const AssetCatalogAssetGraph = React.memo(
   ({
     selection,
     onChangeSelection,
-    isFullScreen,
-    toggleFullScreen,
+    tabs,
   }: {
     selection: string;
     onChangeSelection: (selection: string) => void;
-    isFullScreen: boolean;
-    toggleFullScreen: () => void;
+    tabs: React.ReactNode;
   }) => {
+    useFullScreenAllowedView();
+
+    const {isFullScreen, toggleFullScreen} = useFullScreen();
+
     const history = useHistory();
     const openInNewTab = useOpenInNewTab();
 
@@ -79,30 +82,33 @@ export const AssetCatalogAssetGraph = React.memo(
     const [opNames, setOpNames] = useState<string[]>(['']);
 
     return (
-      <AssetGraphExplorer
-        fetchOptions={fetchOptions}
-        options={lineageOptions}
-        explorerPath={useMemo(
-          () => ({
-            opsQuery: selection,
-            pipelineName: '',
-            opNames,
-          }),
-          [selection, opNames],
-        )}
-        onChangeExplorerPath={useCallback(
-          (path: ExplorerPath) => {
-            setOpNames(path.opNames.length > 0 ? path.opNames : ['']);
-            onChangeSelection(path.opsQuery);
-          },
-          [onChangeSelection],
-        )}
-        onNavigateToSourceAssetNode={onNavigateToSourceAssetNode}
-        viewType={AssetGraphViewType.CATALOG}
-        isFullScreen={isFullScreen}
-        toggleFullScreen={toggleFullScreen}
-        setHideEdgesToNodesOutsideQuery={setHideEdgesToNodesOutsideQuery}
-      />
+      <>
+        {tabs}
+        <AssetGraphExplorer
+          fetchOptions={fetchOptions}
+          options={lineageOptions}
+          explorerPath={useMemo(
+            () => ({
+              opsQuery: selection,
+              pipelineName: '',
+              opNames,
+            }),
+            [selection, opNames],
+          )}
+          onChangeExplorerPath={useCallback(
+            (path: ExplorerPath) => {
+              setOpNames(path.opNames.length > 0 ? path.opNames : ['']);
+              onChangeSelection(path.opsQuery);
+            },
+            [onChangeSelection],
+          )}
+          onNavigateToSourceAssetNode={onNavigateToSourceAssetNode}
+          viewType={AssetGraphViewType.CATALOG}
+          isFullScreen={isFullScreen}
+          toggleFullScreen={toggleFullScreen}
+          setHideEdgesToNodesOutsideQuery={setHideEdgesToNodesOutsideQuery}
+        />
+      </>
     );
   },
 );

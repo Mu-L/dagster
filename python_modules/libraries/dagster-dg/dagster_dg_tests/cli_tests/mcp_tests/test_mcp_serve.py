@@ -51,7 +51,7 @@ async def test_list_dagster_components():
             assert not response.isError
             assert len(response.content) == 1
             text_content = cast("TextContent", response.content[0])
-            assert "dagster.components.DefinitionsComponent" in text_content.text
+            assert "dagster.DefinitionsComponent" in text_content.text
 
 
 @pytest.mark.skipif(sys.version_info < (3, 10), reason="no mcp support on 3.9")
@@ -63,33 +63,29 @@ async def test_scaffold_dagster_component_and_check_yaml():
                 "scaffold_dagster_component",
                 {
                     "project_path": ".",
-                    "component_type": "dagster.components.DefinitionsComponent",
+                    "component_type": "dagster.DefinitionsComponent",
                     "component_name": "my_defs",
                     "component_arguments": [],
                 },
             )
             assert not response.isError
 
-            assert (
-                Path.cwd() / "src" / "foo_bar/" / "defs" / "my_defs" / "component.yaml"
-            ).exists()
+            assert (Path.cwd() / "src" / "foo_bar/" / "defs" / "my_defs" / "defs.yaml").exists()
 
             response = await session.call_tool(
-                "check_dagster_component_yaml",
+                "check_dagster_defs_yaml",
                 {
                     "project_path": ".",
                 },
             )
             assert response.isError
 
-            assert (
-                Path.cwd() / "src" / "foo_bar/" / "defs" / "my_defs" / "component.yaml"
-            ).write_text(
-                "type: dagster.components.DefinitionsComponent\n\nattributes:\n  path: test.py"
+            assert (Path.cwd() / "src" / "foo_bar/" / "defs" / "my_defs" / "defs.yaml").write_text(
+                "type: dagster.DefinitionsComponent\n\nattributes:\n  path: test.py"
             )
 
             response = await session.call_tool(
-                "check_dagster_component_yaml",
+                "check_dagster_defs_yaml",
                 {
                     "project_path": ".",
                 },

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Optional, Union
 
+import dagster as dg
 import pytest
 from dagster._core.definitions.asset_key import AssetKey
 from dagster._core.definitions.definitions_class import Definitions
@@ -35,6 +36,18 @@ def test_error():
         ResolutionException, match=r"Could not derive resolver for annotation\W*foo:"
     ):
         MyNewThing.resolve_from_yaml("")
+
+
+def test_error_core_model_suggestion():
+    @dataclass
+    class MyKeyThing(Resolvable):
+        key: AssetKey
+
+    with pytest.raises(
+        ResolutionException,
+        match=r".*An annotated resolver for AssetKey is available, you may wish to use it instead: ResolvedAssetKey",
+    ):
+        MyKeyThing.resolve_from_yaml("")
 
 
 def test_nested():
@@ -87,6 +100,45 @@ foo_name: steve
 """
     )
     assert thing.foo.name == "steve"
+
+
+def test_passthru():
+    @dataclass
+    class MyThing(Resolvable):
+        foo: Annotated[str, Resolver.passthrough()]
+
+    thing = MyThing.resolve_from_yaml(
+        """
+foo: bar
+"""
+    )
+    assert thing.foo == "bar"
+
+    thing = MyThing.resolve_from_yaml(
+        """
+foo: "{{ template_var }}"
+"""
+    )
+    assert thing.foo == "{{ template_var }}"
+
+
+def test_passthru_does_not_process_nested_resolvers():
+    class Foo(BaseModel):
+        name: Annotated[str, Resolver(lambda context, name: name.upper())]
+
+    @dataclass
+    class MyThing(Resolvable):
+        foo: Annotated[Foo, Resolver.passthrough()]
+
+    thing = MyThing.resolve_from_yaml(
+        """
+foo:
+  name: bar
+"""
+    )
+
+    # Nested resolvers are not processed
+    assert thing.foo.name == "bar"
 
 
 def test_py_model():
@@ -288,3 +340,32 @@ foo: foo
 bar: bar
 """)
     assert w.foo == "cool"
+
+
+def test_scope():
+    class DailyPartitionDefinitionModel(Resolvable, Model):
+        type: Literal["daily"] = "daily"
+        start_date: str
+        end_offset: int = 0
+
+    class Example(Resolvable, Model):
+        part: Annotated[
+            dg.DailyPartitionsDefinition,
+            Resolver.default(
+                model_field_type=DailyPartitionDefinitionModel,
+                can_inject=True,
+            ),
+        ]
+
+        def build_defs(self, context) -> dg.Definitions:
+            return dg.Definitions()
+
+    daily = dg.DailyPartitionsDefinition(start_date="2025-01-01")
+    ex = Example.resolve_from_yaml(
+        """
+part: "{{ daily }}"
+""",
+        scope={"daily": daily},
+    )
+
+    assert ex.part == daily

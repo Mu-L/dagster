@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 import re
 import shutil
@@ -133,6 +134,22 @@ ConfigFileType: TypeAlias = Literal["dg.toml", "pyproject.toml"]
 PackageLayoutType: TypeAlias = Literal["root", "src"]
 
 
+def install_editable_dg_dev_packages_to_venv(venv_path: Path) -> None:
+    install_editable_dagster_packages_to_venv(
+        venv_path,
+        [
+            "dagster",
+            "dagster-webserver",
+            "dagster-graphql",
+            "dagster-test",
+            "dagster-pipes",
+            "libraries/dagster-dg",
+            "libraries/dagster-shared",
+            "libraries/dagster-cloud-cli",
+        ],
+    )
+
+
 @contextmanager
 def isolated_example_workspace(
     runner: Union[CliRunner, "ProxyRunner"],
@@ -141,7 +158,7 @@ def isolated_example_workspace(
     use_editable_dagster: bool = True,
     workspace_config_file_type: ConfigFileType = "dg.toml",
     project_config_file_type: ConfigFileType = "pyproject.toml",
-) -> Iterator[None]:
+) -> Iterator[Path]:
     runner = ProxyRunner(runner) if isinstance(runner, CliRunner) else runner
     dagster_git_repo_dir = str(discover_git_root(Path(__file__)))
     with (
@@ -184,18 +201,11 @@ def isolated_example_workspace(
             if create_venv:
                 subprocess.run(["uv", "venv", ".venv"], check=True)
                 venv_path = Path.cwd() / ".venv"
-                install_editable_dagster_packages_to_venv(
+
+                install_editable_dg_dev_packages_to_venv(
                     venv_path,
-                    [
-                        "dagster",
-                        "dagster-webserver",
-                        "dagster-graphql",
-                        "dagster-test",
-                        "dagster-pipes",
-                        "libraries/dagster-shared",
-                    ],
                 )
-            yield
+            yield Path.cwd()
 
 
 _MIN_DAGSTER_COMPONENTS_MERGED_VERSION = Version("1.10.8")
@@ -207,7 +217,6 @@ _MIN_DAGSTER_COMPONENTS_MERGED_VERSION = Version("1.10.8")
 def isolated_example_project_foo_bar(
     runner: Union[CliRunner, "ProxyRunner"],
     in_workspace: bool = True,
-    populate_cache: bool = False,
     component_dirs: Sequence[Path] = [],
     config_file_type: ConfigFileType = "pyproject.toml",
     package_layout: PackageLayoutType = "src",
@@ -215,7 +224,7 @@ def isolated_example_project_foo_bar(
     dagster_version: Optional[Union[str, Version]] = None,
     python_environment: DgProjectPythonEnvironmentFlag = "active",
     # Only works when python_environment is "active"
-    skip_venv: bool = True,
+    uv_sync: bool = False,
 ) -> Iterator[Path]:
     """Scaffold a project named foo_bar in an isolated filesystem.
 
@@ -242,6 +251,11 @@ def isolated_example_project_foo_bar(
             Version(dagster_version) if isinstance(dagster_version, str) else dagster_version
         )
 
+    if python_environment == "active":
+        uv_sync_args = ["--uv-sync"] if uv_sync else ["--no-uv-sync"]
+    else:
+        uv_sync_args = []
+
     runner = ProxyRunner(runner) if isinstance(runner, CliRunner) else runner
     dagster_git_repo_dir = str(discover_git_root(Path(__file__)))
     project_path = Path("foo-bar")
@@ -254,15 +268,11 @@ def isolated_example_project_foo_bar(
             "scaffold",
             "project",
             "foo-bar",
+            *uv_sync_args,
             *["--python-environment", python_environment],
-            *(["--no-populate-cache"] if not populate_cache else []),
             *(["--use-editable-dagster", dagster_git_repo_dir] if use_editable_dagster else []),
         ]
         result = runner.invoke(*args)
-
-        if python_environment == "active" and not skip_venv:
-            venv_path = Path("foo-bar", ".venv")
-            subprocess.run(["python", "-m", "venv", str(venv_path)], check=True)
 
         assert_runner_result(result)
         if config_file_type == "dg.toml":
@@ -284,7 +294,7 @@ def isolated_example_project_foo_bar(
             with modify_toml_as_dict(Path("foo-bar/pyproject.toml")) as toml:
                 create_toml_node(toml, ("tool", "hatch", "build", "packages"), ["foo_bar"])
 
-            if python_environment == "active" and not skip_venv:
+            if python_environment == "active" and not uv_sync:
                 # Reinstall to venv since package root changed
                 install_to_venv(Path("foo-bar/.venv"), ["-e", "foo-bar"])
 
@@ -294,11 +304,14 @@ def isolated_example_project_foo_bar(
             # version Y installed.
             if dagster_version:
                 uv_add_args = [f"dagster=={dagster_version}"]
+                library_version = library_version_from_core_version(str(dagster_version))
+                uv_add_args.append(f"dagster-shared=={library_version}")
+                uv_add_args.append(f"dagster-dg=={library_version}")
+                uv_add_args.append(f"dagster-cloud-cli=={dagster_version}")
+
                 if dagster_version < _MIN_DAGSTER_COMPONENTS_MERGED_VERSION:
-                    dagster_components_version = library_version_from_core_version(
-                        str(dagster_version)
-                    )
-                    uv_add_args.append(f"dagster-components=={dagster_components_version}")
+                    uv_add_args.append(f"dagster-components=={library_version}")
+
                 subprocess.check_output(["uv", "add", *uv_add_args])
 
             for src_dir in component_dirs:
@@ -324,7 +337,7 @@ def isolated_example_project_foo_bar(
 @contextmanager
 def isolated_example_component_library_foo_bar(
     runner: Union[CliRunner, "ProxyRunner"],
-    lib_module_name: Optional[str] = None,
+    components_module_name: Optional[str] = None,
 ) -> Iterator[None]:
     runner = ProxyRunner(runner) if isinstance(runner, CliRunner) else runner
     with isolated_example_project_foo_bar(
@@ -339,17 +352,17 @@ def isolated_example_component_library_foo_bar(
         with modify_toml(Path("pyproject.toml")) as toml:
             delete_toml_node(toml, ("tool", "dg"))
 
-            # We need to set any alternative lib package name and then install into the
+            # We need to set any alternative components package name and then install into the
             # environment, since it affects entry points which are set at install time.
-            if lib_module_name:
+            if components_module_name:
                 set_toml_node(
                     toml,
                     ("project", "entry-points", "dagster_dg.plugin", "foo_bar"),
-                    lib_module_name,
+                    components_module_name,
                 )
-                lib_dir = Path("src", *lib_module_name.split("."))
-                lib_dir.mkdir(exist_ok=True)
-                (lib_dir / "__init__.py").touch()
+                components_dir = Path("src", *components_module_name.split("."))
+                components_dir.mkdir(exist_ok=True)
+                (components_dir / "__init__.py").touch()
 
         # Install the component library into our venv
         venv_path = Path(".venv")
@@ -587,6 +600,11 @@ def match_terminal_box_output(output: str, expected_output: str):
     return True
 
 
+def match_json_output(output: str, expected_output: str):
+    """Compare two JSON strings, ignoring whitespace and newlines."""
+    return json.dumps(json.loads(output)) == json.dumps(json.loads(expected_output))
+
+
 # Windows sometimes provides short (8.3) paths in output, which can be difficult to match exactly.
 def normalize_windows_path(path: str) -> str:
     """Convert a Windows short (8.3) path to its long form.
@@ -660,8 +678,8 @@ class ProxyRunner:
         # We need to find the right spot to inject global options. For the `dg scaffold`
         # command, we need to inject the global options before the final subcommand. For everything
         # else they can be appended at the end of the options.
-        if args[0] == "scaffold":
-            index = 1
+        if args[0] == "scaffold" and args[1] == "defs":
+            index = 2
         elif "--help" in args:
             index = args.index("--help")
         elif "--" in args:

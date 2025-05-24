@@ -1,16 +1,14 @@
-import contextlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import NamedTemporaryFile
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, Optional, Union
 
 import click
-import yaml
 from dagster_shared.serdes.objects import PluginObjectKey
 from dagster_shared.utils import environ
 from packaging.version import Version
@@ -142,7 +140,7 @@ def configure_mcp_command(
 # ########################
 
 
-@utils_group.command(name="inspect-component-type", cls=DgClickCommand)
+@utils_group.command(name="inspect-component", cls=DgClickCommand)
 @click.argument("component_type", type=str)
 @click.option("--description", is_flag=True, default=False)
 @click.option("--scaffold-params-schema", is_flag=True, default=False)
@@ -222,7 +220,12 @@ MIN_ENV_VAR_INJECTION_VERSION = Version("1.10.8")
 
 @contextmanager
 def create_temp_workspace_file(dg_context: DgContext) -> Iterator[str]:
-    with NamedTemporaryFile(mode="w+", delete=True) as temp_workspace_file:
+    # defer for import performance
+    import yaml
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_workspace_file = Path(temp_dir) / "workspace.yaml"
+
         entries = []
         if dg_context.is_project:
             entries.append(_workspace_entry_for_project(dg_context))
@@ -241,9 +244,9 @@ def create_temp_workspace_file(dg_context: DgContext) -> Iterator[str]:
                         f"variable injection ({MIN_ENV_VAR_INJECTION_VERSION}). Environment variables will not be injected for location {project_context.code_location_name}."
                     )
                 entries.append(_workspace_entry_for_project(project_context))
-        yaml.dump({"load_from": entries}, temp_workspace_file)
-        temp_workspace_file.flush()
-        yield temp_workspace_file.name
+
+        temp_workspace_file.write_text(yaml.dump({"load_from": entries}))
+        yield str(temp_workspace_file)
 
 
 def _dagster_cloud_entry_for_project(
@@ -273,6 +276,9 @@ def _dagster_cloud_entry_for_project(
 
 
 def create_temp_dagster_cloud_yaml_file(dg_context: DgContext, statedir: str) -> str:
+    # defer for import performance
+    import yaml
+
     dagster_cloud_yaml_path = Path(statedir) / "dagster_cloud.yaml"
     with open(dagster_cloud_yaml_path, "w+") as temp_dagster_cloud_yaml_file:
         entries = []
@@ -288,46 +294,12 @@ def create_temp_dagster_cloud_yaml_file(dg_context: DgContext, statedir: str) ->
         return temp_dagster_cloud_yaml_file.name
 
 
-class DagsterCliCmd(NamedTuple):
-    cmd_location: str
-    cmd: list[str]
-    workspace_file: Optional[str]
-
-
-@contextlib.contextmanager
-def create_dagster_cli_cmd(
-    dg_context: DgContext, forward_options: list[str], run_cmds: list[str]
-) -> Iterator[DagsterCliCmd]:
-    cmd = [*run_cmds, *forward_options]
-    if dg_context.is_project:
-        cmd_location = dg_context.get_executable("dagster")
-        with create_temp_workspace_file(dg_context) as temp_workspace_file:
-            yield DagsterCliCmd(
-                cmd_location=str(cmd_location), cmd=cmd, workspace_file=temp_workspace_file
-            )
-        # yield CommandArgs(cmd_location=str(cmd_location), cmd=cmd, workspace_file=None)
-    elif dg_context.is_workspace:
-        with create_temp_workspace_file(dg_context) as temp_workspace_file:
-            yield DagsterCliCmd(
-                cmd=cmd,
-                cmd_location="ephemeral",
-                workspace_file=temp_workspace_file,
-            )
-    else:
-        exit_with_error("This command must be run inside a code location or deployment directory.")
-
-
-def format_forwarded_option(option: str, value: object) -> list[str]:
-    return [] if value is None else [option, str(value)]
-
-
 @contextmanager
 def activate_venv(venv_path: Union[str, Path]) -> Iterator[None]:
     """Simulated activation of the passed in virtual environment for the current process."""
     venv_path = (Path(venv_path) if isinstance(venv_path, str) else venv_path).absolute()
     with environ(
         {
-            "DG_DISABLE_IN_PROCESS": "1",
             "VIRTUAL_ENV": str(venv_path),
             "PATH": os.pathsep.join(
                 [

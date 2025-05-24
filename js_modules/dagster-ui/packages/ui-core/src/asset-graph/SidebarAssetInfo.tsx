@@ -6,7 +6,6 @@ import {AutomationConditionEvaluationLink} from './AssetNode2025';
 import {GraphNode, displayNameForAssetKey, nodeDependsOnSelf, stepKeyForAsset} from './Utils';
 import {gql, useQuery} from '../apollo-client';
 import {SidebarAssetQuery, SidebarAssetQueryVariables} from './types/SidebarAssetInfo.types';
-import {AssetNodeForGraphQueryFragment} from './types/useAssetGraphData.types';
 import {COMMON_COLLATOR} from '../app/Util';
 import {useAssetAutomationData} from '../asset-data/AssetAutomationDataProvider';
 import {useAssetLiveData} from '../asset-data/AssetLiveDataProvider';
@@ -36,7 +35,7 @@ import {
 import {useRecentAssetEvents} from '../assets/useRecentAssetEvents';
 import {DagsterTypeSummary} from '../dagstertype/DagsterType';
 import {DagsterTypeFragment} from '../dagstertype/types/DagsterType.types';
-import {MaterializationHistoryEventTypeSelector} from '../graphql/types';
+import {AssetEventHistoryEventTypeSelector} from '../graphql/types';
 import {METADATA_ENTRY_FRAGMENT} from '../metadata/MetadataEntryFragment';
 import {TableSchemaAssetContext} from '../metadata/TableSchema';
 import {ScheduleOrSensorTag} from '../nav/ScheduleOrSensorTag';
@@ -45,6 +44,7 @@ import {SidebarSection, SidebarTitle} from '../pipelines/SidebarComponents';
 import {ResourceContainer, ResourceHeader} from '../pipelines/SidebarOpHelpers';
 import {pluginForMetadata} from '../plugins';
 import {AnchorButton} from '../ui/AnchorButton';
+import {WorkspaceAssetFragment} from '../workspace/WorkspaceContext/types/WorkspaceQueries.types';
 import {buildRepoAddress} from '../workspace/buildRepoAddress';
 import {RepoAddress} from '../workspace/types';
 import {workspacePathFromAddress} from '../workspace/workspacePath';
@@ -67,14 +67,11 @@ export const SidebarAssetInfo = ({graphNode}: {graphNode: GraphNode}) => {
   const {lastMaterialization} = liveData || {};
   const asset = data?.assetNodeOrError.__typename === 'AssetNode' ? data.assetNodeOrError : null;
 
-  const recentEvents = useRecentAssetEvents(
-    asset?.assetKey,
-    1,
-    MaterializationHistoryEventTypeSelector.MATERIALIZATION,
-  );
-  const latestMaterializationEvent = recentEvents.materializations
-    ? recentEvents.materializations[recentEvents.materializations.length - 1]
-    : undefined;
+  const recentEvents = useRecentAssetEvents(asset?.assetKey, 1, [
+    definition.isObservable
+      ? AssetEventHistoryEventTypeSelector.OBSERVATION
+      : AssetEventHistoryEventTypeSelector.MATERIALIZATION,
+  ]);
 
   if (!asset) {
     return (
@@ -224,7 +221,7 @@ export const SidebarAssetInfo = ({graphNode}: {graphNode: GraphNode}) => {
           <TableSchemaAssetContext.Provider
             value={{
               assetKey,
-              materializationMetadataEntries: latestMaterializationEvent?.metadataEntries,
+              materializationMetadataEntries: recentEvents.events[0]?.metadataEntries,
               definitionMetadataEntries: assetMetadata,
             }}
           >
@@ -263,7 +260,7 @@ const TypeSidebarSection = ({assetType}: {assetType: DagsterTypeFragment}) => {
 };
 
 interface HeaderProps {
-  assetNode: AssetNodeForGraphQueryFragment;
+  assetNode: WorkspaceAssetFragment;
   opName?: string;
   repoAddress?: RepoAddress | null;
 }

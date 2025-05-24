@@ -4,7 +4,6 @@ business logic or clever indexing. Use the classes in external.py
 for that.
 """
 
-import inspect
 import json
 import os
 from abc import ABC, abstractmethod
@@ -28,7 +27,11 @@ from dagster._config.pythonic_config import (
     ConfigurableIOManagerFactoryResourceDefinition,
     ConfigurableResourceFactoryResourceDefinition,
 )
-from dagster._config.pythonic_config.resource import coerce_to_resource, is_coercible_to_resource
+from dagster._config.pythonic_config.resource import (
+    coerce_to_resource,
+    get_resource_type_name,
+    is_coercible_to_resource,
+)
 from dagster._config.snap import ConfigFieldSnap, ConfigSchemaSnapshot, snap_from_config_type
 from dagster._core.definitions import (
     AssetSelection,
@@ -93,7 +96,7 @@ from dagster._core.origin import RepositoryPythonOrigin
 from dagster._core.snap import JobSnap
 from dagster._core.snap.mode import ResourceDefSnap, build_resource_def_snap
 from dagster._core.storage.io_manager import IOManagerDefinition
-from dagster._core.storage.tags import COMPUTE_KIND_TAG
+from dagster._core.storage.tags import COMPUTE_KIND_TAG, TAGS_INCLUDE_IN_REMOTE_JOB_REF
 from dagster._core.utils import is_valid_email
 from dagster._record import IHaveNew, record, record_custom
 from dagster._serdes import whitelist_for_serdes
@@ -456,6 +459,7 @@ class JobRefSnap:
     snapshot_id: str
     active_presets: Sequence["PresetSnap"]
     parent_snapshot_id: Optional[str]
+    preview_tags: Optional[Mapping[str, str]] = None
 
     @classmethod
     def from_job_def(cls, job_def: JobDefinition) -> Self:
@@ -466,7 +470,11 @@ class JobRefSnap:
             snapshot_id=job_def.get_job_snapshot_id(),
             parent_snapshot_id=None,
             active_presets=active_presets_from_job_def(job_def),
+            preview_tags=get_preview_tags(job_def),
         )
+
+    def get_preview_tags(self) -> Mapping[str, str]:
+        return self.preview_tags or {}
 
 
 @whitelist_for_serdes(
@@ -1250,28 +1258,7 @@ class ResourceSnap(IHaveNew):
         }
 
         resource_type_def = resource_def
-
-        # use the resource function name as the resource type if it's a function resource
-        # (ie direct instantiation of ResourceDefinition or IOManagerDefinition)
-        if type(resource_type_def) in (ResourceDefinition, IOManagerDefinition):
-            original_resource_fn = (
-                resource_type_def._hardcoded_resource_type  # noqa: SLF001
-                if resource_type_def._hardcoded_resource_type  # noqa: SLF001
-                else resource_type_def.resource_fn
-            )
-            module_name = check.not_none(inspect.getmodule(original_resource_fn)).__name__
-            resource_type = f"{module_name}.{original_resource_fn.__name__}"
-        # if it's a Pythonic resource, get the underlying Pythonic class name
-        elif isinstance(
-            resource_type_def,
-            (
-                ConfigurableResourceFactoryResourceDefinition,
-                ConfigurableIOManagerFactoryResourceDefinition,
-            ),
-        ):
-            resource_type = _get_class_name(resource_type_def.configurable_resource_cls)
-        else:
-            resource_type = _get_class_name(type(resource_type_def))
+        resource_type = get_resource_type_name(resource_type_def)
 
         dagster_maintained = (
             resource_type_def._is_dagster_maintained()  # noqa: SLF001
@@ -1642,17 +1629,18 @@ def asset_node_snaps_from_repo(repo: RepositoryDefinition) -> Sequence[AssetNode
     # key. This is the node that will be used to populate the AssetNodeSnap. We need to identify
     # a primary node because the same asset can be materialized as part of multiple jobs.
     primary_node_pairs_by_asset_key: dict[AssetKey, tuple[NodeOutputHandle, JobDefinition]] = {}
-    job_defs_by_asset_key: dict[AssetKey, list[JobDefinition]] = {}
+    job_defs_by_asset_key: dict[AssetKey, list[JobDefinition]] = defaultdict(list)
     for job_def in repo.get_all_jobs():
         asset_layer = job_def.asset_layer
+        for asset_key in asset_layer.additional_asset_keys:
+            job_defs_by_asset_key[asset_key].append(job_def)
         asset_keys_by_node_output = asset_layer.asset_keys_by_node_output_handle
         for node_output_handle, asset_key in asset_keys_by_node_output.items():
             if asset_key not in asset_layer.asset_keys_for_node(node_output_handle.node_handle):
                 continue
             if asset_key not in primary_node_pairs_by_asset_key:
                 primary_node_pairs_by_asset_key[asset_key] = (node_output_handle, job_def)
-            job_defs_by_asset_key.setdefault(asset_key, []).append(job_def)
-
+            job_defs_by_asset_key[asset_key].append(job_def)
     asset_node_snaps: list[AssetNodeSnap] = []
     asset_graph = repo.asset_graph
     for key in sorted(asset_graph.get_all_asset_keys()):
@@ -1680,7 +1668,6 @@ def asset_node_snaps_from_repo(repo: RepositoryDefinition) -> Sequence[AssetNode
             pools = {op_def.pool for op_def in op_defs if op_def.pool}
             op_names = sorted([str(handle) for handle in node_handles])
             op_name = graph_name or next(iter(op_names), None) or node_def.name
-            job_names = sorted([jd.name for jd in job_defs_by_asset_key[key]])
             compute_kind = node_def.tags.get(COMPUTE_KIND_TAG)
             node_definition_name = node_def.name
 
@@ -1698,7 +1685,6 @@ def asset_node_snaps_from_repo(repo: RepositoryDefinition) -> Sequence[AssetNode
             pools = set()
             op_names = []
             op_name = None
-            job_names = []
             compute_kind = None
             node_definition_name = None
             output_name = None
@@ -1741,7 +1727,7 @@ def asset_node_snaps_from_repo(repo: RepositoryDefinition) -> Sequence[AssetNode
                 node_definition_name=node_definition_name,
                 graph_name=graph_name,
                 description=asset_node.description,
-                job_names=job_names,
+                job_names=sorted([jd.name for jd in job_defs_by_asset_key[key]]),
                 partitions=(
                     PartitionsSnap.from_def(asset_node.partitions_def)
                     if asset_node.partitions_def
@@ -1859,6 +1845,10 @@ def active_presets_from_job_def(job_def: JobDefinition) -> Sequence[PresetSnap]:
                 tags={},
             )
         ]
+
+
+def get_preview_tags(job_def: JobDefinition) -> Mapping[str, str]:
+    return {k: v for k, v in job_def.tags.items() if k in TAGS_INCLUDE_IN_REMOTE_JOB_REF}
 
 
 def resolve_automation_condition_args(
